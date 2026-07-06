@@ -4,9 +4,16 @@ An MVP web app where you submit a software feature request and the system behave
 like an AI engineering assistant: it plans the work, changes code in a sample repo,
 runs tests, and produces a PR-style summary.
 
-**Phase 1 status:** project skeleton, Docker Compose stack, backend API + models,
-ARQ worker with a deterministic stub agent, and a dashboard listing tasks.
-The real agent pipeline (Claude API, sample repo edits, Task Detail UI) is Phase 2.
+**Phase 2 status:** the pipeline is real. Each task copies `sample_repo/` into a
+scratch workspace, generates a plan, edits files, computes unified diffs, runs
+pytest in the workspace, and writes a PR-style summary. Two agent brains sit
+behind the same `AgentRunner` interface:
+
+- `AGENT_MODE=mock` (default) — deterministic agent, no API calls; makes a real
+  edit and runs real tests.
+- `AGENT_MODE=llm` — **ClaudeRunner**: Claude plans the change, then edits the
+  workspace through a tool-use loop (`list_files` / `read_file` / `write_file` /
+  `delete_file`). Requires `ANTHROPIC_API_KEY` in `.env`.
 
 ## Stack
 
@@ -27,15 +34,19 @@ make seed        # in a second terminal: seed a project + demo tasks
 Then open:
 
 - Dashboard: http://localhost:3000
+- New Task: http://localhost:3000/tasks/new
 - API docs: http://localhost:8000/docs
 
-Create a task and watch the worker drive it through
-`pending → planning → coding → testing → completed` on the dashboard:
+Submit a task from the New Task page and watch it move through
+`pending → planning → coding → testing → completed`. The Task Detail page
+shows the request, plan, execution log, per-file diffs, test output, and the
+final PR-style summary.
 
-```bash
-curl -X POST http://localhost:8000/api/v1/tasks \
-  -H 'Content-Type: application/json' \
-  -d '{"project_id": 1, "title": "Add subtract function", "request": "Add subtract(a, b) to the calculator."}'
+To use the real Claude agent, set in `.env` and restart:
+
+```
+AGENT_MODE=llm
+ANTHROPIC_API_KEY=sk-ant-...
 ```
 
 ## Tests
@@ -57,8 +68,10 @@ python3.13 -m venv .venv
 
 ```
 backend/    FastAPI app: api → services → repositories → models
-  app/agent/    AgentRunner interface + stub runner (Claude runner in Phase 2)
+  app/agent/    AgentRunner interface, MockRunner, ClaudeRunner,
+                Workspace (scratch copy + diffs), PytestExecutor
   app/worker/   ARQ worker settings + job queue abstraction
-frontend/   Next.js dashboard
+frontend/   Next.js dashboard, New Task, and Task Detail pages
+sample_repo/  Tiny Python project the agent operates on (never edited in place)
 docs/       Design docs
 ```

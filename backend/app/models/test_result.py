@@ -22,5 +22,6 @@ class TestResult(Base):
     errored: Mapped[int] = mapped_column(Integer, default=0)
     duration: Mapped[float] = mapped_column(Float, default=0.0)
     output: Mapped[str] = mapped_column(Text, default="")
+    stderr: Mapped[str] = mapped_column(Text, default="")
 
     run: Mapped["AgentRun"] = relationship(back_populates="test_results")

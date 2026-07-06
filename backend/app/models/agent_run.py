@@ -26,6 +26,7 @@ class AgentRun(Base):
     )
     plan: Mapped[list | None] = mapped_column(JSON, nullable=True)
     summary: Mapped[str | None] = mapped_column(Text, nullable=True)
+    log: Mapped[str | None] = mapped_column(Text, nullable=True)
     error: Mapped[str | None] = mapped_column(Text, nullable=True)
     started_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()

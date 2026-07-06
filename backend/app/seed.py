@@ -5,7 +5,7 @@ Run inside the backend container: python -m app.seed
 
 import asyncio
 
-from app.agent.stub_runner import StubAgentRunner
+from app.agent.mock_runner import MockRunner
 from app.db.session import async_session_factory
 from app.models import Project, Task
 from app.repositories.project_repo import ProjectRepository
@@ -42,9 +42,9 @@ async def seed() -> None:
         session.add_all([completed, pending])
         await session.commit()
 
-        # Run the real pipeline (stub runner, no delays) so the completed task
-        # has a genuine AgentRun with a file change and test result attached.
-        await RunService(session, runner=StubAgentRunner(delay=0)).execute_agent_run(
+        # Run the real pipeline (mock runner, no delays) so the completed task
+        # has a genuine AgentRun with real diffs and a real pytest result.
+        await RunService(session, runner=MockRunner(delay=0)).execute_agent_run(
             completed.id
         )
         print(f"Seeded project {project.id} with tasks {completed.id}, {pending.id}.")

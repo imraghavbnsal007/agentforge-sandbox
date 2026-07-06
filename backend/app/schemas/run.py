@@ -24,6 +24,7 @@ class TestResultRead(BaseModel):
     errored: int
     duration: float
     output: str
+    stderr: str
 
 
 class AgentRunRead(BaseModel):
@@ -35,6 +36,7 @@ class AgentRunRead(BaseModel):
     status: RunStatus
     plan: list[str] | None
     summary: str | None
+    log: str | None
     error: str | None
     started_at: datetime
     finished_at: datetime | None

@@ -1,10 +1,11 @@
 from httpx import AsyncClient
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.agent.stub_runner import StubAgentRunner
+from app.agent.mock_runner import MockRunner
 from app.models import Project, Task
 from app.services.run_service import RunService
 from tests.conftest import FakeQueue
+from tests.test_services.test_run_service import FakeExecutor
 
 
 async def test_create_task_enqueues_job(
@@ -61,7 +62,9 @@ async def test_get_task_detail_without_run(client: AsyncClient, task: Task) -> N
 async def test_get_task_detail_includes_latest_run(
     client: AsyncClient, session: AsyncSession, task: Task
 ) -> None:
-    await RunService(session, runner=StubAgentRunner(delay=0)).execute_agent_run(task.id)
+    await RunService(
+        session, runner=MockRunner(delay=0), executor=FakeExecutor()
+    ).execute_agent_run(task.id)
 
     response = await client.get(f"/api/v1/tasks/{task.id}")
     assert response.status_code == 200
@@ -69,11 +72,15 @@ async def test_get_task_detail_includes_latest_run(
     assert body["status"] == "completed"
     run = body["latest_run"]
     assert run["status"] == "completed"
-    assert len(run["plan"]) == 5
-    assert len(run["file_changes"]) == 1
-    assert run["file_changes"][0]["path"] == "sample_repo/calculator.py"
+    assert len(run["plan"]) == 4
+    paths = [c["path"] for c in run["file_changes"]]
+    assert "calculator.py" in paths
+    assert "tests/test_multiply.py" in paths
+    assert run["file_changes"][0]["diff"].startswith("---")
     assert len(run["test_results"]) == 1
-    assert run["test_results"][0]["passed"] == 12
+    assert run["test_results"][0]["passed"] == 7
+    assert run["test_results"][0]["stderr"] == ""
+    assert run["log"] and "workspace ready" in run["log"]
     assert "Files changed" in run["summary"]
 
 

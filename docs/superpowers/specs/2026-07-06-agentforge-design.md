@@ -1,6 +1,6 @@
 # AgentForge — MVP Design
 
-Date: 2026-07-06 · Status: approved (Phase 1 implemented)
+Date: 2026-07-06 · Status: approved (Phases 1–2 implemented)
 
 ## Goal
 
@@ -51,6 +51,11 @@ GET  /api/v1/tasks/{id}       includes latest run + file changes + test results
 
 1. **Done:** skeleton, Compose, models + Alembic, API, worker stub pipeline,
    dashboard, seed data, tests.
-2. Sample repo, real agent runners (mock file edits → Claude API), New Task page,
-   Task Detail page (plan / diffs / tests / summary panels).
-3. GitHub integration, auth, retries, streaming updates.
+2. **Done:** sample repo + Workspace (scratch copy, path-safe file ops, unified
+   diffs), PytestExecutor (real subprocess run: stdout/stderr/duration/counts),
+   MockRunner (real deterministic edits), ClaudeRunner (plan call + tool-use
+   edit loop + summary call on claude-opus-4-8), execution log on AgentRun,
+   New Task page, Task Detail page (request / plan / log / diffs / tests /
+   summary). Single intelligent agent only — no multi-agent split yet.
+3. GitHub integration, auth, retries, streaming updates; split into
+   Planner/Coder/Reviewer/QA only once the single agent is reliable.

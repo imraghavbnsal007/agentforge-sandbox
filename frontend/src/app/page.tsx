@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { AutoRefresh } from "@/components/AutoRefresh";
 import { StatusBadge } from "@/components/StatusBadge";
 import { getProjects, getTasks, type Project, type Task } from "@/lib/api";
@@ -34,9 +35,12 @@ export default async function Dashboard() {
             Feature requests handled by the agent
           </p>
         </div>
-        <span className="cursor-not-allowed rounded-lg bg-slate-200 px-4 py-2 text-sm font-medium text-slate-400">
-          New Task (Phase 2)
-        </span>
+        <Link
+          href="/tasks/new"
+          className="rounded-lg bg-slate-900 px-4 py-2 text-sm font-medium text-white hover:bg-slate-700"
+        >
+          New Task
+        </Link>
       </div>
 
       {tasks.length === 0 ? (
@@ -59,10 +63,14 @@ export default async function Dashboard() {
               {tasks.map((task) => (
                 <tr key={task.id} className="hover:bg-slate-50">
                   <td className="px-4 py-3">
-                    <p className="font-medium text-slate-900">{task.title}</p>
-                    <p className="mt-0.5 line-clamp-1 max-w-md text-xs text-slate-500">
-                      {task.request}
-                    </p>
+                    <Link href={`/tasks/${task.id}`} className="group block">
+                      <p className="font-medium text-slate-900 group-hover:underline">
+                        {task.title}
+                      </p>
+                      <p className="mt-0.5 line-clamp-1 max-w-md text-xs text-slate-500">
+                        {task.request}
+                      </p>
+                    </Link>
                   </td>
                   <td className="px-4 py-3 text-slate-600">
                     {projectNames.get(task.project_id) ?? `#${task.project_id}`}

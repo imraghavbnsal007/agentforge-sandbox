@@ -1,36 +1,34 @@
-from dataclasses import dataclass
-from typing import Protocol
+from typing import Callable, Protocol
 
-from app.core.enums import AgentMode, ChangeType
+from app.agent.executor import TestResultData
+from app.agent.workspace import FileChangeData, Workspace
+from app.core.enums import AgentMode
 
-
-@dataclass
-class FileChangeData:
-    path: str
-    change_type: ChangeType
-    diff: str
-
-
-@dataclass
-class TestResultData:
-    suite: str
-    passed: int
-    failed: int
-    errored: int
-    duration: float
-    output: str
+# Callback the runner uses to append lines to the run's execution log.
+LogFn = Callable[[str], None]
 
 
 class AgentRunner(Protocol):
-    """The agent 'brain'. Implementations: stub (mock mode) and, in Phase 2, Claude API."""
+    """The agent 'brain'. MockRunner is deterministic; ClaudeRunner calls the Claude API.
+
+    Both operate on a Workspace (a scratch copy of the sample repo): they edit
+    files in place, and RunService computes diffs and runs tests afterwards.
+    """
 
     mode: AgentMode
 
-    async def generate_plan(self, title: str, request: str) -> list[str]: ...
+    async def generate_plan(
+        self, title: str, request: str, workspace: Workspace
+    ) -> list[str]: ...
 
-    async def apply_changes(self, title: str, request: str) -> list[FileChangeData]: ...
-
-    async def run_tests(self, title: str, request: str) -> TestResultData: ...
+    async def apply_changes(
+        self,
+        title: str,
+        request: str,
+        plan: list[str],
+        workspace: Workspace,
+        log: LogFn,
+    ) -> None: ...
 
     async def summarize(
         self,
@@ -44,9 +42,9 @@ class AgentRunner(Protocol):
 
 def get_runner(mode: AgentMode) -> AgentRunner:
     if mode == AgentMode.mock:
-        from app.agent.stub_runner import StubAgentRunner
+        from app.agent.mock_runner import MockRunner
 
-        return StubAgentRunner()
-    raise NotImplementedError(
-        "AGENT_MODE=llm (Claude API runner) arrives in Phase 2 — use AGENT_MODE=mock"
-    )
+        return MockRunner()
+    from app.agent.claude_runner import ClaudeRunner
+
+    return ClaudeRunner()
