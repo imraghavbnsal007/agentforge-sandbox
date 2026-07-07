@@ -98,7 +98,9 @@ class ClaudeRunner:
             client = anthropic.AsyncAnthropic(
                 api_key=settings.anthropic_api_key or None
             )
-            if client.api_key is None and client.auth_token is None:
+            # Empty strings count as missing: compose passes ANTHROPIC_API_KEY=""
+            # when unset, and the SDK would accept it and fail at request time.
+            if not client.api_key and not client.auth_token:
                 raise RuntimeError(
                     "ANTHROPIC_API_KEY is not set — required for AGENT_MODE=llm. "
                     "Add it to .env and restart the backend and worker."
@@ -134,6 +136,12 @@ class ClaudeRunner:
         except anthropic.APIConnectionError as exc:
             raise RuntimeError(
                 "Could not reach the Claude API — check network connectivity"
+            ) from exc
+        except TypeError as exc:
+            # SDK raises TypeError when credentials fail to resolve at request time.
+            raise RuntimeError(
+                "Anthropic credentials missing or invalid — set ANTHROPIC_API_KEY "
+                "in .env and restart"
             ) from exc
 
     async def generate_plan(
