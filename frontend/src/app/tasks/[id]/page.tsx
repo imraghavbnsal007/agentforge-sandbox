@@ -5,6 +5,7 @@ import { AutoRefresh } from "@/components/AutoRefresh";
 import { DiffView } from "@/components/DiffView";
 import { ModeBadge } from "@/components/ModeBadge";
 import { RetryButton } from "@/components/RetryButton";
+import { ReviewActions } from "@/components/ReviewActions";
 import { StatusBadge } from "@/components/StatusBadge";
 import { getConfig, getTask, type TaskDetail } from "@/lib/api";
 
@@ -27,7 +28,7 @@ function Section({
   );
 }
 
-const ACTIVE_STATUSES = ["pending", "planning", "coding", "testing"];
+const ACTIVE_STATUSES = ["pending", "planning", "coding", "testing", "publishing"];
 
 export default async function TaskDetailPage({
   params,
@@ -46,7 +47,7 @@ export default async function TaskDetailPage({
   const run = task.latest_run;
   const tests = run?.test_results ?? [];
   const inProgress = ACTIVE_STATUSES.includes(task.status);
-  const finished = task.status === "completed" || task.status === "failed";
+  const finished = ["completed", "failed", "rejected"].includes(task.status);
 
   return (
     <div className="space-y-5">
@@ -75,7 +76,41 @@ export default async function TaskDetailPage({
 
       {run?.error && (
         <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
-          <span className="font-medium">Run failed:</span> {run.error}
+          <span className="font-medium">
+            {task.status === "ready_for_review" ? "Publish failed:" : "Run failed:"}
+          </span>{" "}
+          {run.error}
+        </div>
+      )}
+
+      {task.status === "ready_for_review" && <ReviewActions taskId={task.id} />}
+
+      {task.status === "publishing" && (
+        <div className="flex items-center gap-3 rounded-lg border border-cyan-200 bg-cyan-50 px-4 py-3 text-sm text-cyan-800">
+          <span className="h-2 w-2 animate-pulse rounded-full bg-cyan-500" />
+          Publishing — cloning, applying changes, pushing, and opening the pull request…
+        </div>
+      )}
+
+      {run?.pr_url && (
+        <div className="rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-4">
+          <p className="text-sm font-medium text-emerald-900">Pull request created</p>
+          <div className="mt-2 flex flex-wrap items-center gap-3 text-xs">
+            <span className="rounded bg-white px-2 py-1 font-mono text-slate-700 ring-1 ring-slate-200">
+              {run.branch_name}
+            </span>
+            <span className="rounded bg-white px-2 py-1 font-mono text-slate-700 ring-1 ring-slate-200">
+              {run.commit_sha?.slice(0, 10)}
+            </span>
+            <a
+              href={run.pr_url}
+              target="_blank"
+              rel="noreferrer"
+              className="rounded-lg bg-emerald-600 px-3 py-1.5 font-medium text-white hover:bg-emerald-500"
+            >
+              View Pull Request →
+            </a>
+          </div>
         </div>
       )}
 

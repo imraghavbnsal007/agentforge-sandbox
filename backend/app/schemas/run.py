@@ -38,6 +38,9 @@ class AgentRunRead(BaseModel):
     summary: str | None
     log: str | None
     error: str | None
+    branch_name: str | None
+    commit_sha: str | None
+    pr_url: str | None
     started_at: datetime
     finished_at: datetime | None
     file_changes: list[FileChangeRead]

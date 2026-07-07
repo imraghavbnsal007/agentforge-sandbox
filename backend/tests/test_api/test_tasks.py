@@ -128,6 +128,32 @@ async def test_list_tasks_includes_latest_run_mode(
     assert body[0]["latest_run_mode"] == "mock"
 
 
+async def test_approve_and_reject_flow(
+    client: AsyncClient, session: AsyncSession, task: Task, fake_queue: FakeQueue
+) -> None:
+    from app.core.enums import TaskStatus
+
+    # Approve/reject require ready_for_review.
+    assert (await client.post(f"/api/v1/tasks/{task.id}/approve")).status_code == 409
+    assert (await client.post(f"/api/v1/tasks/{task.id}/reject")).status_code == 409
+
+    task.status = TaskStatus.ready_for_review
+    await session.commit()
+    response = await client.post(f"/api/v1/tasks/{task.id}/approve")
+    assert response.status_code == 200
+    assert response.json()["status"] == "publishing"
+    assert fake_queue.publish_enqueued == [task.id]
+
+    # Reject path on a second reviewable task state.
+    task.status = TaskStatus.ready_for_review
+    await session.commit()
+    response = await client.post(f"/api/v1/tasks/{task.id}/reject")
+    assert response.status_code == 200
+    assert response.json()["status"] == "rejected"
+
+    assert (await client.post("/api/v1/tasks/999/approve")).status_code == 404
+
+
 async def test_config_endpoint(client: AsyncClient) -> None:
     response = await client.get("/api/v1/config")
     assert response.status_code == 200

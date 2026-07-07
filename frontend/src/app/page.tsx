@@ -104,11 +104,24 @@ export default async function Dashboard() {
                     <StatusBadge status={task.status} />
                   </td>
                   <td className="px-4 py-3">
-                    {task.latest_run_mode ? (
-                      <ModeBadge mode={task.latest_run_mode} />
-                    ) : (
-                      <span className="text-xs text-slate-400">—</span>
-                    )}
+                    <span className="flex items-center gap-2">
+                      {task.latest_run_mode ? (
+                        <ModeBadge mode={task.latest_run_mode} />
+                      ) : (
+                        <span className="text-xs text-slate-400">—</span>
+                      )}
+                      {task.latest_run_pr_url && (
+                        <a
+                          href={task.latest_run_pr_url}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="text-xs font-medium text-emerald-600 hover:underline"
+                          title="View pull request"
+                        >
+                          PR ↗
+                        </a>
+                      )}
+                    </span>
                   </td>
                   <td className="px-4 py-3 text-slate-500">
                     {new Date(task.created_at).toLocaleString()}

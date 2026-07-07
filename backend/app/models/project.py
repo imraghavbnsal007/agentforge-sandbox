@@ -17,6 +17,11 @@ class Project(Base):
     name: Mapped[str] = mapped_column(String(200), unique=True)
     description: Mapped[str] = mapped_column(Text, default="")
     repo_path: Mapped[str] = mapped_column(String(500), default="sample_repo")
+    # GitHub configuration; all null = sample-repo mode.
+    repo_url: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    default_branch: Mapped[str] = mapped_column(String(100), default="main")
+    github_owner: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    github_repo: Mapped[str | None] = mapped_column(String(200), nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
     )

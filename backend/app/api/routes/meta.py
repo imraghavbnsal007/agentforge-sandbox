@@ -11,6 +11,7 @@ class ConfigRead(BaseModel):
     agent_mode: AgentMode
     anthropic_model: str
     api_key_configured: bool
+    github_token_configured: bool
 
 
 @router.get("/config", response_model=ConfigRead)
@@ -19,4 +20,5 @@ async def get_config() -> ConfigRead:
         agent_mode=settings.agent_mode,
         anthropic_model=settings.anthropic_model,
         api_key_configured=bool(settings.anthropic_api_key),
+        github_token_configured=bool(settings.github_token),
     )

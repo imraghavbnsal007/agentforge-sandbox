@@ -17,6 +17,7 @@ def _to_read(task: Task) -> TaskRead:
     item = TaskRead.model_validate(task)
     if task.runs:
         item.latest_run_mode = task.runs[-1].mode
+        item.latest_run_pr_url = task.runs[-1].pr_url
     return item
 
 
@@ -47,3 +48,13 @@ async def get_task(task_id: int, service: Service) -> TaskDetail:
 @router.post("/{task_id}/retry", response_model=TaskRead)
 async def retry_task(task_id: int, service: Service) -> TaskRead:
     return TaskRead.model_validate(await service.retry_task(task_id))
+
+
+@router.post("/{task_id}/approve", response_model=TaskRead)
+async def approve_task(task_id: int, service: Service) -> TaskRead:
+    return TaskRead.model_validate(await service.approve_task(task_id))
+
+
+@router.post("/{task_id}/reject", response_model=TaskRead)
+async def reject_task(task_id: int, service: Service) -> TaskRead:
+    return TaskRead.model_validate(await service.reject_task(task_id))

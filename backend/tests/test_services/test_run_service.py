@@ -86,6 +86,54 @@ async def test_execute_agent_run_failure_marks_task_failed(
     assert task.status == TaskStatus.failed
 
 
+async def test_github_project_goes_ready_for_review(
+    session: AsyncSession, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from app.models import Project
+
+    project = Project(
+        name="GH",
+        repo_url="https://github.com/acme/widget.git",
+        github_owner="acme",
+        github_repo="widget",
+    )
+    session.add(project)
+    await session.flush()
+    task = Task(project_id=project.id, title="T", request="R")
+    session.add(task)
+    await session.commit()
+
+    from app.core.config import settings
+
+    async def fake_factory(_project):
+        return Workspace.create_from(settings.sample_repo_path)
+
+    # Tests green -> ready_for_review, run completed.
+    service = RunService(
+        session,
+        runner=MockRunner(delay=0),
+        executor=FakeExecutor(),
+        workspace_factory=fake_factory,
+    )
+    run = await service.execute_agent_run(task.id)
+    assert run.status == RunStatus.completed
+    assert task.status == TaskStatus.ready_for_review
+    assert "ready for review" in run.log
+
+    # Tests red -> completed, no review gate.
+    task2 = Task(project_id=project.id, title="T2", request="R")
+    session.add(task2)
+    await session.commit()
+    service = RunService(
+        session,
+        runner=MockRunner(delay=0),
+        executor=FakeExecutor(passed=1, failed=3),
+        workspace_factory=fake_factory,
+    )
+    await service.execute_agent_run(task2.id)
+    assert task2.status == TaskStatus.completed
+
+
 async def test_llm_mode_without_api_key_fails_cleanly(
     session: AsyncSession, task: Task, monkeypatch: pytest.MonkeyPatch
 ) -> None:

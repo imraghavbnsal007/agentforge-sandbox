@@ -11,6 +11,9 @@ export type TaskStatus =
   | "planning"
   | "coding"
   | "testing"
+  | "ready_for_review"
+  | "publishing"
+  | "rejected"
   | "completed"
   | "failed";
 
@@ -25,12 +28,14 @@ export interface Task {
   created_at: string;
   updated_at: string;
   latest_run_mode: "mock" | "llm" | null;
+  latest_run_pr_url: string | null;
 }
 
 export interface AppConfig {
   agent_mode: "mock" | "llm";
   anthropic_model: string;
   api_key_configured: boolean;
+  github_token_configured: boolean;
 }
 
 export interface Project {
@@ -68,6 +73,9 @@ export interface AgentRun {
   summary: string | null;
   log: string | null;
   error: string | null;
+  branch_name: string | null;
+  commit_sha: string | null;
+  pr_url: string | null;
   started_at: string;
   finished_at: string | null;
   file_changes: FileChange[];
@@ -103,17 +111,23 @@ export function getConfig(): Promise<AppConfig> {
   return get<AppConfig>("/api/v1/config");
 }
 
-/** Browser-side: re-enqueue an agent run for an existing task. */
-export async function retryTask(id: number): Promise<Task> {
-  const res = await fetch(`${PUBLIC_API_URL}/api/v1/tasks/${id}/retry`, {
+async function postAction(id: number, action: string): Promise<Task> {
+  const res = await fetch(`${PUBLIC_API_URL}/api/v1/tasks/${id}/${action}`, {
     method: "POST",
   });
   if (!res.ok) {
     const body = await res.json().catch(() => null);
-    throw new Error(body?.detail ?? `Retry failed with ${res.status}`);
+    throw new Error(body?.detail ?? `${action} failed with ${res.status}`);
   }
   return res.json();
 }
+
+/** Browser-side: re-enqueue an agent run for an existing task. */
+export const retryTask = (id: number) => postAction(id, "retry");
+/** Browser-side: approve a reviewed task — publishes branch + PR. */
+export const approveTask = (id: number) => postAction(id, "approve");
+/** Browser-side: reject a reviewed task. */
+export const rejectTask = (id: number) => postAction(id, "reject");
 
 /** Browser-side: create a task and enqueue its agent run. */
 export async function createTask(input: {

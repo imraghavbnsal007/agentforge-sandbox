@@ -41,7 +41,12 @@ class Workspace:
         shutil.copytree(
             source, root, dirs_exist_ok=True, ignore=shutil.ignore_patterns(*IGNORED)
         )
-        ws = cls(root, {})
+        return cls.from_dir(root)
+
+    @classmethod
+    def from_dir(cls, root: Path) -> "Workspace":
+        """Wrap an already-populated directory (e.g. a git clone) and snapshot it."""
+        ws = cls(Path(root), {})
         ws._snapshot = {path: ws.read_file(path) for path in ws.list_files()}
         return ws
 
@@ -54,8 +59,12 @@ class Workspace:
     def list_files(self) -> list[str]:
         files = []
         for path in self.root.rglob("*"):
-            if path.is_file() and "__pycache__" not in path.parts:
-                files.append(path.relative_to(self.root).as_posix())
+            if not path.is_file():
+                continue
+            parts = path.relative_to(self.root).parts
+            if "__pycache__" in parts or ".git" in parts:
+                continue
+            files.append(path.relative_to(self.root).as_posix())
         return sorted(files)
 
     def read_file(self, rel_path: str) -> str:
@@ -84,18 +93,23 @@ class Workspace:
             after = self.read_file(path) if path in current_files else None
             if before == after:
                 continue
+            # /dev/null headers for creates/deletes make the diffs valid
+            # input for `git apply` at publish time.
             if before is None:
                 change_type = ChangeType.create
+                fromfile, tofile = "/dev/null", f"b/{path}"
             elif after is None:
                 change_type = ChangeType.delete
+                fromfile, tofile = f"a/{path}", "/dev/null"
             else:
                 change_type = ChangeType.modify
+                fromfile, tofile = f"a/{path}", f"b/{path}"
             diff = "".join(
                 difflib.unified_diff(
                     (before or "").splitlines(keepends=True),
                     (after or "").splitlines(keepends=True),
-                    fromfile=f"a/{path}",
-                    tofile=f"b/{path}",
+                    fromfile=fromfile,
+                    tofile=tofile,
                 )
             )
             changes.append(FileChangeData(path=path, change_type=change_type, diff=diff))

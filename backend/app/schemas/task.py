@@ -22,8 +22,9 @@ class TaskRead(BaseModel):
     status: TaskStatus
     created_at: datetime
     updated_at: datetime
-    # Mode of the most recent run, populated on list/detail reads.
+    # Populated from the most recent run on list/detail reads.
     latest_run_mode: AgentMode | None = None
+    latest_run_pr_url: str | None = None
 
 
 class TaskDetail(TaskRead):

@@ -6,6 +6,9 @@ class TaskStatus(StrEnum):
     planning = "planning"
     coding = "coding"
     testing = "testing"
+    ready_for_review = "ready_for_review"
+    publishing = "publishing"
+    rejected = "rejected"
     completed = "completed"
     failed = "failed"
 

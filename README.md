@@ -81,6 +81,64 @@ Claude for the PR summary. If the API call fails (bad key, rate limit, network),
 the task fails with a readable error shown at the top of the task detail page,
 and Retry Task re-enqueues it.
 
+## GitHub PR workflow
+
+Projects with GitHub configuration follow a **review-gated** flow instead of
+finishing at `completed`:
+
+```
+pending → planning → coding → testing → READY FOR REVIEW
+                                             │
+                       [Approve & Create PR] │ [Reject]
+                                             ▼
+                    publishing → completed (+ PR link)   /   rejected
+```
+
+The agent works on a shallow clone of your repo. When tests pass, the task
+stops at **ready for review** — nothing touches GitHub yet. On the task page
+you review the plan, diffs, and test results, then click **Approve & Create
+PR**. Only then does AgentForge clone fresh, re-apply the stored diffs
+(`git apply` — fails loudly if the base branch moved), re-run pytest as a final
+gate, create a branch (`agentforge/task-<id>-<slug>`), commit, push, and open
+the PR. **Reject** closes the task with no GitHub activity. If publishing
+fails (bad token, moved base branch), the task returns to ready-for-review
+with the exact error shown, so you can fix the cause and approve again.
+
+### Setup
+
+1. Create a [fine-grained personal access token](https://github.com/settings/personal-access-tokens)
+   scoped to the target repo with **Contents: Read and write** and
+   **Pull requests: Read and write**.
+2. Add to `.env` (never committed; never logged):
+
+   ```
+   GITHUB_TOKEN=github_pat_...
+   GITHUB_ALLOWED_REPOS=you/your-repo    # optional but recommended allowlist
+   ```
+
+3. Restart: `docker compose up -d --force-recreate backend worker`
+4. Register a GitHub-configured project:
+
+   ```bash
+   curl -X POST http://localhost:8000/api/v1/projects \
+     -H 'Content-Type: application/json' \
+     -d '{
+       "name": "My Repo",
+       "repo_url": "https://github.com/you/your-repo.git",
+       "default_branch": "main",
+       "github_owner": "you",
+       "github_repo": "your-repo"
+     }'
+   ```
+
+5. Create tasks against that project from the New Task page.
+
+Safety: tasks can only publish to the repo configured on their project row;
+the optional `GITHUB_ALLOWED_REPOS` allowlist refuses anything else even if a
+project is misconfigured; the token is injected via a git header (never stored
+in remotes or `.git/config`) and scrubbed from all logs and error messages.
+Projects without GitHub fields keep the plain sample-repo flow.
+
 ## Tests
 
 ```bash

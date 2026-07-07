@@ -17,9 +17,13 @@ class FakeQueue:
 
     def __init__(self) -> None:
         self.enqueued: list[int] = []
+        self.publish_enqueued: list[int] = []
 
     async def enqueue_run_agent(self, task_id: int) -> None:
         self.enqueued.append(task_id)
+
+    async def enqueue_publish_task(self, task_id: int) -> None:
+        self.publish_enqueued.append(task_id)
 
 
 @pytest.fixture

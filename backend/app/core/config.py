@@ -17,6 +17,16 @@ class Settings(BaseSettings):
     anthropic_api_key: str = ""
     anthropic_model: str = "claude-opus-4-8"
     sample_repo_path: str = str(_REPO_ROOT / "sample_repo")
+    github_token: str = ""
+    # Optional comma-separated allowlist ("owner/repo,owner/repo2"). When set,
+    # publishing to any repo not in the list fails even if a project row
+    # is configured for it.
+    github_allowed_repos: str = ""
+
+    def allowed_repos(self) -> set[str] | None:
+        if not self.github_allowed_repos.strip():
+            return None
+        return {r.strip() for r in self.github_allowed_repos.split(",") if r.strip()}
     # Seconds the mock runner pauses between pipeline steps so status
     # transitions are observable in the UI. Tests set this to 0.
     agent_step_delay: float = 1.5
