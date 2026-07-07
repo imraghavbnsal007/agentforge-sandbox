@@ -87,3 +87,51 @@ async def test_get_task_detail_includes_latest_run(
 async def test_get_unknown_task_404(client: AsyncClient) -> None:
     response = await client.get("/api/v1/tasks/999")
     assert response.status_code == 404
+
+
+async def test_retry_task_reenqueues(
+    client: AsyncClient, session: AsyncSession, task: Task, fake_queue: FakeQueue
+) -> None:
+    # Simulate a finished (failed or completed) task, then retry it.
+    await RunService(
+        session, runner=MockRunner(delay=0), executor=FakeExecutor()
+    ).execute_agent_run(task.id)
+
+    response = await client.post(f"/api/v1/tasks/{task.id}/retry")
+    assert response.status_code == 200
+    body = response.json()
+    assert body["status"] == "pending"
+    assert fake_queue.enqueued == [task.id]
+
+    # A second run accumulates in the history; detail exposes all runs.
+    await RunService(
+        session, runner=MockRunner(delay=0), executor=FakeExecutor()
+    ).execute_agent_run(task.id)
+    detail = (await client.get(f"/api/v1/tasks/{task.id}")).json()
+    assert len(detail["runs"]) == 2
+    assert detail["latest_run"]["id"] == detail["runs"][-1]["id"]
+    assert detail["latest_run_mode"] == "mock"
+
+
+async def test_retry_unknown_task_404(client: AsyncClient) -> None:
+    response = await client.post("/api/v1/tasks/999/retry")
+    assert response.status_code == 404
+
+
+async def test_list_tasks_includes_latest_run_mode(
+    client: AsyncClient, session: AsyncSession, task: Task
+) -> None:
+    await RunService(
+        session, runner=MockRunner(delay=0), executor=FakeExecutor()
+    ).execute_agent_run(task.id)
+    body = (await client.get("/api/v1/tasks")).json()
+    assert body[0]["latest_run_mode"] == "mock"
+
+
+async def test_config_endpoint(client: AsyncClient) -> None:
+    response = await client.get("/api/v1/config")
+    assert response.status_code == 200
+    body = response.json()
+    assert body["agent_mode"] in ("mock", "llm")
+    assert "anthropic_model" in body
+    assert isinstance(body["api_key_configured"], bool)

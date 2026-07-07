@@ -1,5 +1,6 @@
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.enums import TaskStatus
 from app.core.exceptions import NotFoundError
 from app.models import Task
 from app.repositories.project_repo import ProjectRepository
@@ -32,4 +33,16 @@ class TaskService:
         task = await self.tasks.get_with_runs(task_id)
         if task is None:
             raise NotFoundError(f"Task {task_id} not found")
+        return task
+
+    async def retry_task(self, task_id: int) -> Task:
+        """Re-enqueue an agent run for an existing task (a new AgentRun is created)."""
+        task = await self.tasks.get(task_id)
+        if task is None:
+            raise NotFoundError(f"Task {task_id} not found")
+        task.status = TaskStatus.pending
+        await self.session.commit()
+        # updated_at is server-generated on UPDATE, so refresh before serializing.
+        await self.session.refresh(task)
+        await self.queue.enqueue_run_agent(task.id)
         return task

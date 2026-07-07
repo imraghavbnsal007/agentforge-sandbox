@@ -93,13 +93,48 @@ class ClaudeRunner:
         model: str | None = None,
     ) -> None:
         if client is None:
-            if not settings.anthropic_api_key:
+            # Falls back to env credentials (ANTHROPIC_API_KEY /
+            # ANTHROPIC_AUTH_TOKEN) when no key is set in app config.
+            client = anthropic.AsyncAnthropic(
+                api_key=settings.anthropic_api_key or None
+            )
+            if client.api_key is None and client.auth_token is None:
                 raise RuntimeError(
-                    "ANTHROPIC_API_KEY is not set — required for AGENT_MODE=llm"
+                    "ANTHROPIC_API_KEY is not set — required for AGENT_MODE=llm. "
+                    "Add it to .env and restart the backend and worker."
                 )
-            client = anthropic.AsyncAnthropic(api_key=settings.anthropic_api_key)
         self.client = client
         self.model = model or settings.anthropic_model
+
+    async def _create(self, **kwargs) -> anthropic.types.Message:
+        """messages.create with Claude API errors mapped to readable messages."""
+        try:
+            return await self.client.messages.create(**kwargs)
+        except anthropic.AuthenticationError as exc:
+            raise RuntimeError(
+                "Claude API authentication failed (401) — check ANTHROPIC_API_KEY"
+            ) from exc
+        except anthropic.PermissionDeniedError as exc:
+            raise RuntimeError(
+                "Claude API permission denied (403) — the API key lacks access "
+                f"to model {self.model!r}"
+            ) from exc
+        except anthropic.NotFoundError as exc:
+            raise RuntimeError(
+                f"Claude API 404 — unknown model {self.model!r}? Check ANTHROPIC_MODEL"
+            ) from exc
+        except anthropic.RateLimitError as exc:
+            raise RuntimeError(
+                "Claude API rate limited (429) — wait a moment and retry the task"
+            ) from exc
+        except anthropic.APIStatusError as exc:
+            raise RuntimeError(
+                f"Claude API error ({exc.status_code}): {exc.message}"
+            ) from exc
+        except anthropic.APIConnectionError as exc:
+            raise RuntimeError(
+                "Could not reach the Claude API — check network connectivity"
+            ) from exc
 
     async def generate_plan(
         self, title: str, request: str, workspace: Workspace
@@ -110,7 +145,7 @@ class ClaudeRunner:
             "Write a short implementation plan for this request: 3 to 7 steps, "
             "one per line, each starting with a number. Output only the plan."
         )
-        response = await self.client.messages.create(
+        response = await self._create(
             model=self.model,
             max_tokens=2048,
             system=SYSTEM_PROMPT,
@@ -151,7 +186,7 @@ class ClaudeRunner:
         ]
 
         for _ in range(MAX_EDIT_ITERATIONS):
-            response = await self.client.messages.create(
+            response = await self._create(
                 model=self.model,
                 max_tokens=MAX_TOKENS,
                 system=SYSTEM_PROMPT,
@@ -224,7 +259,7 @@ class ClaudeRunner:
             "changed and why, a bullet list of files changed, and a test "
             "results section. Be concise."
         )
-        response = await self.client.messages.create(
+        response = await self._create(
             model=self.model,
             max_tokens=2048,
             system=SYSTEM_PROMPT,

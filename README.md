@@ -39,15 +39,47 @@ Then open:
 
 Submit a task from the New Task page and watch it move through
 `pending → planning → coding → testing → completed`. The Task Detail page
-shows the request, plan, execution log, per-file diffs, test output, and the
-final PR-style summary.
+shows the request, plan, execution log, per-file diffs, test output, the final
+PR-style summary, a Retry Task button, and a collapsible "View Raw Logs"
+section with the full history of every run (mode, status, error, log).
 
-To use the real Claude agent, set in `.env` and restart:
+## Agent modes
 
+The dashboard header shows which mode the server is running; every task row
+and task detail page shows which mode produced its latest run.
+
+### Mock mode (default — no API key needed)
+
+```bash
+# .env
+AGENT_MODE=mock
 ```
+
+The deterministic `MockRunner` makes a real edit (adds `multiply()` + tests to
+the workspace copy) and runs real pytest — the full pipeline without API calls.
+Use this for development and demos.
+
+### LLM mode (real Claude agent)
+
+```bash
+# .env
 AGENT_MODE=llm
-ANTHROPIC_API_KEY=sk-ant-...
+ANTHROPIC_API_KEY=sk-ant-...          # required
+ANTHROPIC_MODEL=claude-opus-4-8       # optional, this is the default
 ```
+
+Then restart the backend and worker so they pick up the new env:
+
+```bash
+docker compose up -d --force-recreate backend worker
+```
+
+`ClaudeRunner` asks Claude for a plan, lets it edit the workspace through a
+tool-use loop (`list_files` / `read_file` / `write_file` / `delete_file` —
+every call appears in the execution log), runs pytest on the result, and asks
+Claude for the PR summary. If the API call fails (bad key, rate limit, network),
+the task fails with a readable error shown at the top of the task detail page,
+and Retry Task re-enqueues it.
 
 ## Tests
 

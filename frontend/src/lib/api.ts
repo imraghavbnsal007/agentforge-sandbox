@@ -24,6 +24,13 @@ export interface Task {
   status: TaskStatus;
   created_at: string;
   updated_at: string;
+  latest_run_mode: "mock" | "llm" | null;
+}
+
+export interface AppConfig {
+  agent_mode: "mock" | "llm";
+  anthropic_model: string;
+  api_key_configured: boolean;
 }
 
 export interface Project {
@@ -69,6 +76,7 @@ export interface AgentRun {
 
 export interface TaskDetail extends Task {
   latest_run: AgentRun | null;
+  runs: AgentRun[];
 }
 
 async function get<T>(path: string): Promise<T> {
@@ -89,6 +97,22 @@ export function getTask(id: string | number): Promise<TaskDetail> {
 
 export function getProjects(): Promise<Project[]> {
   return get<Project[]>("/api/v1/projects");
+}
+
+export function getConfig(): Promise<AppConfig> {
+  return get<AppConfig>("/api/v1/config");
+}
+
+/** Browser-side: re-enqueue an agent run for an existing task. */
+export async function retryTask(id: number): Promise<Task> {
+  const res = await fetch(`${PUBLIC_API_URL}/api/v1/tasks/${id}/retry`, {
+    method: "POST",
+  });
+  if (!res.ok) {
+    const body = await res.json().catch(() => null);
+    throw new Error(body?.detail ?? `Retry failed with ${res.status}`);
+  }
+  return res.json();
 }
 
 /** Browser-side: create a task and enqueue its agent run. */

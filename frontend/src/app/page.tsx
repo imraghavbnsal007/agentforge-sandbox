@@ -1,15 +1,28 @@
 import Link from "next/link";
 import { AutoRefresh } from "@/components/AutoRefresh";
+import { ModeBadge } from "@/components/ModeBadge";
 import { StatusBadge } from "@/components/StatusBadge";
-import { getProjects, getTasks, type Project, type Task } from "@/lib/api";
+import {
+  getConfig,
+  getProjects,
+  getTasks,
+  type AppConfig,
+  type Project,
+  type Task,
+} from "@/lib/api";
 
 export const dynamic = "force-dynamic";
 
 export default async function Dashboard() {
   let tasks: Task[];
   let projects: Project[];
+  let config: AppConfig;
   try {
-    [tasks, projects] = await Promise.all([getTasks(), getProjects()]);
+    [tasks, projects, config] = await Promise.all([
+      getTasks(),
+      getProjects(),
+      getConfig(),
+    ]);
   } catch {
     return (
       <div className="rounded-lg border border-red-200 bg-red-50 p-6 text-red-700">
@@ -30,10 +43,21 @@ export default async function Dashboard() {
       <AutoRefresh />
       <div className="mb-6 flex items-center justify-between">
         <div>
-          <h2 className="text-2xl font-semibold tracking-tight">Tasks</h2>
+          <div className="flex items-center gap-3">
+            <h2 className="text-2xl font-semibold tracking-tight">Tasks</h2>
+            <ModeBadge
+              mode={config.agent_mode}
+              model={config.agent_mode === "llm" ? config.anthropic_model : undefined}
+            />
+          </div>
           <p className="mt-1 text-sm text-slate-500">
             Feature requests handled by the agent
           </p>
+          {config.agent_mode === "llm" && !config.api_key_configured && (
+            <p className="mt-2 rounded bg-amber-50 px-2 py-1 text-xs text-amber-700">
+              ⚠ AGENT_MODE=llm but no ANTHROPIC_API_KEY configured — runs will fail.
+            </p>
+          )}
         </div>
         <Link
           href="/tasks/new"
@@ -56,6 +80,7 @@ export default async function Dashboard() {
                 <th className="px-4 py-3">Task</th>
                 <th className="px-4 py-3">Project</th>
                 <th className="px-4 py-3">Status</th>
+                <th className="px-4 py-3">Mode</th>
                 <th className="px-4 py-3">Created</th>
               </tr>
             </thead>
@@ -77,6 +102,13 @@ export default async function Dashboard() {
                   </td>
                   <td className="px-4 py-3">
                     <StatusBadge status={task.status} />
+                  </td>
+                  <td className="px-4 py-3">
+                    {task.latest_run_mode ? (
+                      <ModeBadge mode={task.latest_run_mode} />
+                    ) : (
+                      <span className="text-xs text-slate-400">—</span>
+                    )}
                   </td>
                   <td className="px-4 py-3 text-slate-500">
                     {new Date(task.created_at).toLocaleString()}

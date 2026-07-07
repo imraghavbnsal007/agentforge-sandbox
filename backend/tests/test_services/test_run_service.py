@@ -94,6 +94,8 @@ async def test_llm_mode_without_api_key_fails_cleanly(
 
     monkeypatch.setattr(settings, "agent_mode", AgentMode.llm)
     monkeypatch.setattr(settings, "anthropic_api_key", "")
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    monkeypatch.delenv("ANTHROPIC_AUTH_TOKEN", raising=False)
     run = await RunService(session).execute_agent_run(task.id)
 
     assert run.status == RunStatus.failed

@@ -6,7 +6,7 @@ from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
-from app.api.routes import health, projects, tasks
+from app.api.routes import health, meta, projects, tasks
 from app.core.config import settings
 from app.core.exceptions import ConflictError, NotFoundError
 
@@ -37,6 +37,7 @@ def create_app(with_lifespan: bool = True) -> FastAPI:
         return JSONResponse(status_code=409, content={"detail": str(exc)})
 
     app.include_router(health.router)
+    app.include_router(meta.router)
     app.include_router(projects.router)
     app.include_router(tasks.router)
     return app

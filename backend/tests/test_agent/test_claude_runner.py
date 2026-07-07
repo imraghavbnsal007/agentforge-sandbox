@@ -37,10 +37,33 @@ def make_runner(responses):
     return ClaudeRunner(client=client, model="claude-opus-4-8"), client
 
 
-def test_requires_api_key(monkeypatch):
+def test_requires_credentials(monkeypatch):
     monkeypatch.setattr(settings, "anthropic_api_key", "")
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    monkeypatch.delenv("ANTHROPIC_AUTH_TOKEN", raising=False)
     with pytest.raises(RuntimeError, match="ANTHROPIC_API_KEY"):
         ClaudeRunner()
+
+
+async def test_api_errors_are_readable(workspace: Workspace):
+    import anthropic
+    import httpx
+
+    req = httpx.Request("POST", "https://api.anthropic.com/v1/messages")
+
+    auth_error = anthropic.AuthenticationError(
+        "invalid x-api-key",
+        response=httpx.Response(401, request=req),
+        body=None,
+    )
+    runner, _ = make_runner([auth_error])
+    with pytest.raises(RuntimeError, match="authentication failed \\(401\\)"):
+        await runner.generate_plan("T", "R", workspace)
+
+    conn_error = anthropic.APIConnectionError(request=req)
+    runner, _ = make_runner([conn_error])
+    with pytest.raises(RuntimeError, match="Could not reach the Claude API"):
+        await runner.generate_plan("T", "R", workspace)
 
 
 async def test_generate_plan_parses_numbered_lines(workspace: Workspace):

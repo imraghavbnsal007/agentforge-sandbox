@@ -24,7 +24,11 @@ class TaskRepository:
         return result.scalar_one_or_none()
 
     async def list(self, project_id: int | None = None) -> list[Task]:
-        query = select(Task).order_by(Task.created_at.desc(), Task.id.desc())
+        query = (
+            select(Task)
+            .order_by(Task.created_at.desc(), Task.id.desc())
+            .options(selectinload(Task.runs))
+        )
         if project_id is not None:
             query = query.where(Task.project_id == project_id)
         result = await self.session.execute(query)
