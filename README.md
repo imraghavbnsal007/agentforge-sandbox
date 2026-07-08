@@ -188,6 +188,26 @@ Analysis never reads `.env*`, secret/credential/key files, `node_modules`,
   Anything undeterminable is reported as
   "Unable to determine from repository." rather than guessed.
 
+## Frontend development notes
+
+The frontend container keeps `node_modules` **and** `.next` in
+container-private volumes — host-side builds, type checks, or deletes can
+never corrupt the running dev server, and `WATCHPACK_POLLING` makes hot
+reload reliable across the Docker bind mount (file edits show up in ~2s).
+
+- `make typecheck` — type-check the frontend with `tsc --noEmit`
+  (no build output; safe anytime).
+- `make frontend-reset` — rebuild the frontend with **fresh** volumes. Use
+  after changing frontend dependencies (a stale `node_modules` volume
+  otherwise shadows newly installed packages) or if the dev server ever
+  serves stale chunks.
+- While the container runs, `frontend/.next` on the host is a Docker
+  mountpoint and cannot be deleted — you also never need to.
+- If a browser tab shows a `ChunkLoadError` after a rebuild (old HTML
+  requesting chunks that no longer exist), the app reloads itself once
+  automatically (`ChunkGuard`), rate-limited so a broken build can't
+  reload-loop.
+
 ## Tests
 
 ```bash

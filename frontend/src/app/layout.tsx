@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import { ChunkGuard } from "@/components/ChunkGuard";
 import "./globals.css";
 
 export const metadata: Metadata = {
@@ -12,6 +13,7 @@ export default function RootLayout({
   return (
     <html lang="en">
       <body className="min-h-screen bg-slate-50 text-slate-900 antialiased">
+        <ChunkGuard />
         <header className="border-b border-slate-200 bg-white">
           <div className="mx-auto flex max-w-5xl items-center gap-3 px-6 py-4">
             <span className="text-xl">⚒️</span>

@@ -64,11 +64,16 @@ services:
     environment:
       API_URL: http://backend:8000
       NEXT_PUBLIC_API_URL: http://localhost:8000
+      # Reliable file watching for HMR across the macOS/Windows bind mount.
+      WATCHPACK_POLLING: "true"
     ports:
       - "3000:3000"
     volumes:
       - ./frontend:/app
+      # node_modules and .next stay container-private: host-side builds or
+      # deletes must never touch the dev server's live build state.
       - /app/node_modules
+      - /app/.next
     depends_on:
       - backend
 
