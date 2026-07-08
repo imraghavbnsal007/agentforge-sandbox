@@ -126,29 +126,17 @@ def _facts_excerpts(root: Path, facts: RepoFacts) -> str:
     return "\n\n".join(parts)
 
 
-class ClaudeRepoAnalyst:
-    """One Claude call that turns collected facts into the semantic fields."""
+class ServiceAnalyst:
+    """Builds the enrichment prompt and calls whichever provider the
+    project's analysis phase resolves to, via LLMService."""
 
-    def __init__(self, client=None, model: str | None = None) -> None:
-        import anthropic
-
-        if client is None:
-            client = anthropic.AsyncAnthropic(
-                api_key=settings.anthropic_api_key or None
-            )
-            if not client.api_key and not client.auth_token:
-                raise RuntimeError(
-                    "ANTHROPIC_API_KEY is not set — required for AI analysis "
-                    "in llm mode"
-                )
-        self.client = client
-        self.model = model or settings.anthropic_model
+    def __init__(self, service, spec) -> None:
+        self.service = service
+        self.spec = spec
 
     async def enrich(
         self, root: Path, facts: RepoFacts, context: dict | None = None
     ) -> dict:
-        import anthropic
-
         context = context or {}
         prompt = ENRICH_PROMPT.format(
             project_type=context.get("project_type") or UNKNOWN,
@@ -166,39 +154,7 @@ class ClaudeRepoAnalyst:
             readme=facts.readme or "(no README)",
             excerpts=_facts_excerpts(root, facts) or "(none)",
         )
-        try:
-            response = await self.client.messages.create(
-                model=self.model,
-                max_tokens=4096,
-                messages=[{"role": "user", "content": prompt}],
-            )
-        except anthropic.APIStatusError as exc:
-            raise RuntimeError(
-                f"Claude API error during analysis ({exc.status_code}): {exc.message}"
-            ) from exc
-        except anthropic.APIConnectionError as exc:
-            raise RuntimeError(
-                "Could not reach the Claude API during analysis"
-            ) from exc
-        text = "".join(b.text for b in response.content if b.type == "text").strip()
-        text = re.sub(r"^```(?:json)?\s*|\s*```$", "", text)
-        try:
-            data = json.loads(text)
-        except json.JSONDecodeError as exc:
-            raise RuntimeError("Claude returned unparseable analysis JSON") from exc
-        if not isinstance(data, dict):
-            raise RuntimeError("Claude analysis JSON was not an object")
-        return data
-
-
-def _enricher_available() -> bool:
-    import os
-
-    return settings.agent_mode == AgentMode.llm and bool(
-        settings.anthropic_api_key
-        or os.environ.get("ANTHROPIC_API_KEY")
-        or os.environ.get("ANTHROPIC_AUTH_TOKEN")
-    )
+        return await self.service.analyze_repository(self.spec, prompt)
 
 
 async def latest_completed_analysis(
@@ -221,7 +177,7 @@ class AnalysisService:
         self,
         session: AsyncSession,
         git: GitClient | None = None,
-        analyst: ClaudeRepoAnalyst | None = None,
+        analyst: "ServiceAnalyst | None" = None,
     ) -> None:
         self.session = session
         self._git = git
@@ -346,10 +302,37 @@ class AnalysisService:
             await self.session.commit()
 
             analyst = self._analyst
-            if analyst is None and _enricher_available():
-                analyst = ClaudeRepoAnalyst()
+            spec = None
+            if analyst is None and settings.agent_mode == AgentMode.llm:
+                from app.llm.base import get_provider_class
+                from app.llm.profiles import resolve_specs
+                from app.llm.service import LLMService
+
+                spec = resolve_specs(
+                    None, None, None,
+                    project.preferred_provider,
+                    project.preferred_model,
+                    project.preferred_execution_profile,
+                )["analysis"]
+                if get_provider_class(spec.provider).is_configured():
+                    analyst = ServiceAnalyst(
+                        LLMService(
+                            self.session,
+                            project_id=project.id,
+                            analysis_id=analysis.id,
+                        ),
+                        spec,
+                    )
+                else:
+                    log(
+                        f"AI enrichment skipped — provider {spec.provider!r} "
+                        "has no credentials configured"
+                    )
             if analyst is not None:
-                log(f"AI enrichment via {settings.anthropic_model}")
+                log(
+                    "AI enrichment via "
+                    + (f"{spec.provider}/{spec.model}" if spec else "injected analyst")
+                )
                 context = {
                     "project_type": analysis.project_type,
                     "entry_points": analysis.entry_points,

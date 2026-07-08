@@ -81,6 +81,37 @@ Claude for the PR summary. If the API call fails (bad key, rate limit, network),
 the task fails with a readable error shown at the top of the task detail page,
 and Retry Task re-enqueues it.
 
+## Multi-provider AI
+
+All AI interactions go through one provider interface (`app/llm`): business
+logic never imports a provider SDK. Providers: **Anthropic** and
+**Google Gemini** (implemented), OpenAI / OpenRouter / Ollama (registered
+placeholders — selecting one fails gracefully). Adding a provider is one new
+subclass of `BaseLLMProvider`; registration is automatic.
+
+Configuration is env-only — switching provider or model requires zero code:
+
+```
+LLM_PROVIDER=anthropic          # anthropic | google | openai | openrouter | ollama
+DEFAULT_MODEL=claude-sonnet-5   # the provider decides validity
+ANTHROPIC_API_KEY=  GOOGLE_API_KEY=  OPENAI_API_KEY=  OPENROUTER_API_KEY=  OLLAMA_URL=
+```
+
+**Execution profiles** map pipeline phases to provider/model (env-overridable):
+*Cheap* (everything on Gemini Flash), *Balanced* (analysis on Flash;
+planning/coding/review on Claude Sonnet), *Premium* (everything on Claude
+Opus). The New Task page shows each profile's estimated cost and latency
+before execution, plus a Custom mode with explicit provider + model selects.
+Projects remember preferred provider/model/profile (Project page → AI
+settings); new tasks default to them. Precedence: task override → task
+profile → project settings → `LLM_PROVIDER`/`DEFAULT_MODEL` → balanced.
+
+Every provider call is recorded as an **LLMRun** (provider, model, phase,
+tokens, estimated cost, latency, success/error — keys are never logged). The
+**Usage** page aggregates totals, cost per provider/model/project, average
+latency, and success rate. Provider failures mark the task failed with a
+readable message and never crash the worker.
+
 ## GitHub PR workflow
 
 Projects with GitHub configuration follow a **review-gated** flow instead of

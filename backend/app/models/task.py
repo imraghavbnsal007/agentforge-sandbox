@@ -24,6 +24,10 @@ class Task(Base):
     status: Mapped[TaskStatus] = mapped_column(
         str_enum(TaskStatus), default=TaskStatus.pending
     )
+    # Per-task LLM overrides; null falls back to project preferences/profile.
+    llm_provider: Mapped[str | None] = mapped_column(String(30), nullable=True)
+    llm_model: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    execution_profile: Mapped[str | None] = mapped_column(String(20), nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
     )

@@ -5,7 +5,8 @@ import { AutoRefresh } from "@/components/AutoRefresh";
 import { HealthScore } from "@/components/HealthScore";
 import { ReanalyzeButton } from "@/components/ReanalyzeButton";
 import { RepoMapTree } from "@/components/RepoMapTree";
-import { getProject, type ProjectDetail } from "@/lib/api";
+import { ProjectAISettings } from "@/components/ProjectAISettings";
+import { getLLMOptions, getProject, type ProjectDetail } from "@/lib/api";
 
 export const dynamic = "force-dynamic";
 
@@ -44,6 +45,7 @@ export default async function ProjectDetailPage({
   } catch {
     notFound();
   }
+  const llmOptions = await getLLMOptions();
 
   const analysis = project.latest_analysis;
   const analyzing =
@@ -98,6 +100,10 @@ export default async function ProjectDetailPage({
           </Link>
         </div>
       </div>
+
+      <Section title="AI settings (defaults for new tasks)">
+        <ProjectAISettings project={project} options={llmOptions} />
+      </Section>
 
       {analysis?.error && (
         <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">

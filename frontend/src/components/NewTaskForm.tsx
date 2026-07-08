@@ -2,15 +2,39 @@
 
 import { useRouter } from "next/navigation";
 import { useState } from "react";
-import { createTask, type Project } from "@/lib/api";
+import { LLMPicker, type LLMSelection } from "@/components/LLMPicker";
+import { createTask, type LLMOptions, type Project } from "@/lib/api";
+
+function selectionForProject(
+  project: Project | undefined,
+  options: LLMOptions,
+): LLMSelection {
+  if (project?.preferred_provider && project?.preferred_model) {
+    return {
+      profile: "custom",
+      provider: project.preferred_provider,
+      model: project.preferred_model,
+    };
+  }
+  const firstConfigured = options.providers.find(
+    (p) => p.implemented && p.configured,
+  );
+  return {
+    profile: project?.preferred_execution_profile ?? "balanced",
+    provider: firstConfigured?.name ?? options.default_provider,
+    model: firstConfigured?.models[0] ?? options.default_model,
+  };
+}
 
 export function NewTaskForm({
   projects,
+  options,
   defaultProjectId,
   defaultTitle,
   defaultRequest,
 }: {
   projects: Project[];
+  options: LLMOptions;
   defaultProjectId?: number;
   defaultTitle?: string;
   defaultRequest?: string;
@@ -19,11 +43,22 @@ export function NewTaskForm({
   const validDefault = projects.some((p) => p.id === defaultProjectId)
     ? defaultProjectId
     : undefined;
+  const initialProject = projects.find(
+    (p) => p.id === (validDefault ?? projects[0]?.id),
+  );
   const [projectId, setProjectId] = useState(validDefault ?? projects[0]?.id ?? 0);
   const [title, setTitle] = useState(defaultTitle ?? "");
   const [request, setRequest] = useState(defaultRequest ?? "");
+  const [llm, setLlm] = useState<LLMSelection>(() =>
+    selectionForProject(initialProject, options),
+  );
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
+
+  function onProjectChange(id: number) {
+    setProjectId(id);
+    setLlm(selectionForProject(projects.find((p) => p.id === id), options));
+  }
 
   async function onSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -34,6 +69,9 @@ export function NewTaskForm({
         project_id: projectId,
         title,
         request,
+        ...(llm.profile === "custom"
+          ? { llm_provider: llm.provider, llm_model: llm.model }
+          : { execution_profile: llm.profile }),
       });
       router.push(`/tasks/${task.id}`);
     } catch (err) {
@@ -50,7 +88,7 @@ export function NewTaskForm({
         </label>
         <select
           value={projectId}
-          onChange={(e) => setProjectId(Number(e.target.value))}
+          onChange={(e) => onProjectChange(Number(e.target.value))}
           className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm focus:border-slate-500 focus:outline-none"
         >
           {projects.map((p) => (
@@ -88,6 +126,8 @@ export function NewTaskForm({
           className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-slate-500 focus:outline-none"
         />
       </div>
+
+      <LLMPicker options={options} value={llm} onChange={setLlm} />
 
       {error && (
         <p className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">

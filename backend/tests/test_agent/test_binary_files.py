@@ -106,7 +106,7 @@ def test_text_file_with_nul_bytes_is_treated_as_binary(tmp_path: Path):
 
 
 def test_repo_context_omits_binary_content(binary_repo: Path):
-    from app.agent.claude_runner import _repo_context
+    from app.agent.llm_runner import _repo_context
 
     ws = Workspace.from_dir(binary_repo)
     context = _repo_context(ws)

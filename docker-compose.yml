@@ -27,8 +27,14 @@ services:
       DATABASE_URL: postgresql+asyncpg://agentforge:agentforge@postgres:5432/agentforge
       REDIS_URL: redis://redis:6379/0
       AGENT_MODE: ${AGENT_MODE:-mock}
+      LLM_PROVIDER: ${LLM_PROVIDER:-anthropic}
+      DEFAULT_MODEL: ${DEFAULT_MODEL:-}
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
       ANTHROPIC_MODEL: ${ANTHROPIC_MODEL:-claude-opus-4-8}
+      GOOGLE_API_KEY: ${GOOGLE_API_KEY:-}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      OPENROUTER_API_KEY: ${OPENROUTER_API_KEY:-}
+      OLLAMA_URL: ${OLLAMA_URL:-}
       SAMPLE_REPO_PATH: /sample_repo
       GITHUB_TOKEN: ${GITHUB_TOKEN:-}
       GITHUB_ALLOWED_REPOS: ${GITHUB_ALLOWED_REPOS:-}

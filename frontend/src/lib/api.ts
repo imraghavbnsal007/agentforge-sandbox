@@ -25,6 +25,9 @@ export interface Task {
   title: string;
   request: string;
   status: TaskStatus;
+  llm_provider: string | null;
+  llm_model: string | null;
+  execution_profile: string | null;
   created_at: string;
   updated_at: string;
   latest_run_mode: "mock" | "llm" | null;
@@ -33,9 +36,56 @@ export interface Task {
 
 export interface AppConfig {
   agent_mode: "mock" | "llm";
+  llm_provider: string;
+  default_model: string;
   anthropic_model: string;
   api_key_configured: boolean;
   github_token_configured: boolean;
+  providers_configured: Record<string, boolean>;
+}
+
+export interface ProviderInfo {
+  name: string;
+  label: string;
+  configured: boolean;
+  implemented: boolean;
+  models: string[];
+}
+
+export interface ProfileInfo {
+  name: string;
+  phases: Record<string, string>;
+  estimated_cost_usd: number | null;
+  estimated_latency_seconds: number;
+}
+
+export interface LLMOptions {
+  default_provider: string;
+  default_model: string;
+  providers: ProviderInfo[];
+  profiles: ProfileInfo[];
+}
+
+export interface UsageBucket {
+  key: string;
+  requests: number;
+  tokens_in: number;
+  tokens_out: number;
+  cost_usd: number;
+  avg_latency_ms: number;
+  success_rate: number;
+}
+
+export interface UsageReport {
+  total_requests: number;
+  total_tokens_in: number;
+  total_tokens_out: number;
+  total_cost_usd: number;
+  avg_latency_ms: number;
+  success_rate: number;
+  by_provider: UsageBucket[];
+  by_model: UsageBucket[];
+  by_project: UsageBucket[];
 }
 
 export type AnalysisStatus = "pending" | "running" | "completed" | "failed";
@@ -49,6 +99,9 @@ export interface Project {
   default_branch: string;
   github_owner: string | null;
   github_repo: string | null;
+  preferred_provider: string | null;
+  preferred_model: string | null;
+  preferred_execution_profile: string | null;
   created_at: string;
   analysis_status: AnalysisStatus | null;
   last_analyzed_at: string | null;
@@ -264,11 +317,43 @@ export const approveTask = (id: number) => postAction(id, "approve");
 /** Browser-side: reject a reviewed task. */
 export const rejectTask = (id: number) => postAction(id, "reject");
 
+export function getLLMOptions(): Promise<LLMOptions> {
+  return get<LLMOptions>("/api/v1/llm/options");
+}
+
+export function getUsage(): Promise<UsageReport> {
+  return get<UsageReport>("/api/v1/usage");
+}
+
+/** Browser-side: save a project's preferred LLM settings. */
+export async function updateProjectSettings(
+  id: number,
+  input: {
+    preferred_provider: string | null;
+    preferred_model: string | null;
+    preferred_execution_profile: string | null;
+  },
+): Promise<Project> {
+  const res = await fetch(`${PUBLIC_API_URL}/api/v1/projects/${id}/settings`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(input),
+  });
+  if (!res.ok) {
+    const body = await res.json().catch(() => null);
+    throw new Error(body?.detail ?? `Save failed with ${res.status}`);
+  }
+  return res.json();
+}
+
 /** Browser-side: create a task and enqueue its agent run. */
 export async function createTask(input: {
   project_id: number;
   title: string;
   request: string;
+  llm_provider?: string | null;
+  llm_model?: string | null;
+  execution_profile?: string | null;
 }): Promise<Task> {
   const res = await fetch(`${PUBLIC_API_URL}/api/v1/tasks`, {
     method: "POST",

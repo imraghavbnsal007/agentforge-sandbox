@@ -40,11 +40,10 @@ class AgentRunner(Protocol):
     ) -> str: ...
 
 
-def get_runner(mode: AgentMode) -> AgentRunner:
-    if mode == AgentMode.mock:
-        from app.agent.mock_runner import MockRunner
+# NOTE: runner construction for llm mode lives in RunService (it needs the
+# task's provider/model/profile resolution and a DB session for LLMRun
+# tracking); mock mode stays here.
+def get_mock_runner() -> AgentRunner:
+    from app.agent.mock_runner import MockRunner
 
-        return MockRunner()
-    from app.agent.claude_runner import ClaudeRunner
-
-    return ClaudeRunner()
+    return MockRunner()

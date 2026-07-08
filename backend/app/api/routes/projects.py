@@ -10,6 +10,7 @@ from app.schemas.project import (
     ProjectDetail,
     ProjectRead,
     ProjectRegister,
+    ProjectSettingsUpdate,
 )
 from app.services.project_service import ProjectService
 
@@ -54,6 +55,14 @@ async def get_project(project_id: int, service: Service) -> ProjectDetail:
     if project.analyses:
         detail.latest_analysis = AnalysisRead.model_validate(project.analyses[-1])
     return detail
+
+
+@router.patch("/{project_id}/settings", response_model=ProjectRead)
+async def update_project_settings(
+    project_id: int, data: ProjectSettingsUpdate, service: Service
+) -> ProjectRead:
+    await service.update_settings(project_id, data)
+    return _to_read(await service.get_project_detail(project_id))
 
 
 @router.post("/{project_id}/analyze", response_model=AnalysisRead)

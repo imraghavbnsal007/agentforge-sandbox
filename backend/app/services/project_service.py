@@ -107,3 +107,28 @@ class ProjectService:
         if project is None:
             raise NotFoundError(f"Project {project_id} not found")
         return project
+
+    async def update_settings(self, project_id: int, data) -> Project:
+        from app.llm.base import all_providers
+        from app.llm.profiles import get_profiles
+
+        project = await self.repo.get(project_id)
+        if project is None:
+            raise NotFoundError(f"Project {project_id} not found")
+        if data.preferred_provider and data.preferred_provider not in all_providers():
+            raise InvalidInputError(
+                f"Unknown LLM provider {data.preferred_provider!r}"
+            )
+        if (
+            data.preferred_execution_profile
+            and data.preferred_execution_profile not in get_profiles()
+        ):
+            raise InvalidInputError(
+                f"Unknown execution profile {data.preferred_execution_profile!r}"
+            )
+        project.preferred_provider = data.preferred_provider
+        project.preferred_model = data.preferred_model
+        project.preferred_execution_profile = data.preferred_execution_profile
+        await self.session.commit()
+        await self.session.refresh(project)
+        return project

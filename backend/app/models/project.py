@@ -18,6 +18,12 @@ class Project(Base):
     name: Mapped[str] = mapped_column(String(200), unique=True)
     description: Mapped[str] = mapped_column(Text, default="")
     repo_path: Mapped[str] = mapped_column(String(500), default="sample_repo")
+    # Preferred LLM configuration for new tasks (all optional).
+    preferred_provider: Mapped[str | None] = mapped_column(String(30), nullable=True)
+    preferred_model: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    preferred_execution_profile: Mapped[str | None] = mapped_column(
+        String(20), nullable=True
+    )
     # GitHub configuration; all null = sample-repo mode.
     repo_url: Mapped[str | None] = mapped_column(String(500), nullable=True)
     default_branch: Mapped[str] = mapped_column(String(100), default="main")

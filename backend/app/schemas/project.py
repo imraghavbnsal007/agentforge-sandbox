@@ -11,6 +11,12 @@ class ProjectRegister(BaseModel):
     default_branch: str = Field(default="main", min_length=1, max_length=100)
 
 
+class ProjectSettingsUpdate(BaseModel):
+    preferred_provider: str | None = Field(default=None, max_length=30)
+    preferred_model: str | None = Field(default=None, max_length=100)
+    preferred_execution_profile: str | None = Field(default=None, max_length=20)
+
+
 class ProjectCreate(BaseModel):
     name: str = Field(min_length=1, max_length=200)
     description: str = ""
@@ -33,6 +39,9 @@ class ProjectRead(BaseModel):
     default_branch: str
     github_owner: str | None
     github_repo: str | None
+    preferred_provider: str | None
+    preferred_model: str | None
+    preferred_execution_profile: str | None
     created_at: datetime
     # Latest-analysis snapshot, populated on reads.
     analysis_status: AnalysisStatus | None = None

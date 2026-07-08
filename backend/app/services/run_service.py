@@ -12,11 +12,13 @@ from app.agent.executor import (
     TestExecutor,
     TestResultData,
 )
-from app.agent.runner import AgentRunner, get_runner
+from app.agent.runner import AgentRunner, get_mock_runner
 from app.agent.workspace import Workspace
 from app.core.config import settings
-from app.core.enums import RunStatus, TaskStatus
+from app.core.enums import AgentMode, RunStatus, TaskStatus
 from app.core.exceptions import NotFoundError
+from app.llm.profiles import resolve_specs
+from app.llm.service import LLMService
 from app.models import AgentRun, FileChange, Project, Task, TestResult
 from app.services.git_client import GitClient
 from app.services.github_config import is_github_project, validate_github_project
@@ -99,11 +101,17 @@ class RunService:
 
         workspace: Workspace | None = None
         try:
-            runner = self._runner or get_runner(settings.agent_mode)
+            runner = self._runner or self._build_runner(task, project, run)
             # Record the mode actually used (an injected runner may differ
             # from the configured AGENT_MODE).
             run.mode = runner.mode
             log(f"agent run started (mode={runner.mode})")
+            if runner.mode == AgentMode.llm:
+                specs = getattr(runner, "specs", {})
+                described = {
+                    phase: f"{s.provider}/{s.model}" for phase, s in specs.items()
+                }
+                log(f"llm configuration: {described}")
 
             workspace = await self._workspace_factory(project)
             source = (
@@ -220,6 +228,24 @@ class RunService:
                 workspace.cleanup()
 
         return run
+
+    def _build_runner(self, task: Task, project: Project, run: AgentRun) -> AgentRunner:
+        if settings.agent_mode == AgentMode.mock:
+            return get_mock_runner()
+        from app.agent.llm_runner import LLMRunner
+
+        specs = resolve_specs(
+            task.llm_provider,
+            task.llm_model,
+            task.execution_profile,
+            project.preferred_provider,
+            project.preferred_model,
+            project.preferred_execution_profile,
+        )
+        service = LLMService(
+            self.session, project_id=project.id, agent_run_id=run.id
+        )
+        return LLMRunner(service=service, specs=specs)
 
     async def _set_status(self, task: Task, status: TaskStatus) -> None:
         task.status = status

@@ -19,10 +19,31 @@ class TaskService:
         self.projects = ProjectRepository(session)
 
     async def create_task(self, data: TaskCreate) -> Task:
+        from app.core.exceptions import InvalidInputError
+        from app.llm.base import all_providers
+        from app.llm.profiles import get_profiles
+
         project = await self.projects.get(data.project_id)
         if project is None:
             raise NotFoundError(f"Project {data.project_id} not found")
-        task = Task(project_id=data.project_id, title=data.title, request=data.request)
+        if data.llm_provider and data.llm_provider not in all_providers():
+            raise InvalidInputError(
+                f"Unknown LLM provider {data.llm_provider!r} — "
+                f"available: {sorted(all_providers())}"
+            )
+        if data.execution_profile and data.execution_profile not in get_profiles():
+            raise InvalidInputError(
+                f"Unknown execution profile {data.execution_profile!r} — "
+                f"available: {sorted(get_profiles())}"
+            )
+        task = Task(
+            project_id=data.project_id,
+            title=data.title,
+            request=data.request,
+            llm_provider=data.llm_provider,
+            llm_model=data.llm_model,
+            execution_profile=data.execution_profile,
+        )
         self.tasks.add(task)
         await self.session.commit()
         await self.session.refresh(task)

@@ -10,6 +10,10 @@ class TaskCreate(BaseModel):
     project_id: int
     title: str = Field(min_length=1, max_length=200)
     request: str = Field(min_length=1)
+    # Optional LLM overrides; omitted -> project preferences -> defaults.
+    llm_provider: str | None = Field(default=None, max_length=30)
+    llm_model: str | None = Field(default=None, max_length=100)
+    execution_profile: str | None = Field(default=None, max_length=20)
 
 
 class TaskRead(BaseModel):
@@ -20,6 +24,9 @@ class TaskRead(BaseModel):
     title: str
     request: str
     status: TaskStatus
+    llm_provider: str | None
+    llm_model: str | None
+    execution_profile: str | None
     created_at: datetime
     updated_at: datetime
     # Populated from the most recent run on list/detail reads.

@@ -22,6 +22,7 @@ export default function RootLayout({
               <a href="/" className="hover:text-slate-900">Dashboard</a>
               <a href="/projects" className="hover:text-slate-900">Projects</a>
               <a href="/tasks/new" className="hover:text-slate-900">New Task</a>
+              <a href="/usage" className="hover:text-slate-900">Usage</a>
             </nav>
             <span className="ml-auto hidden text-sm text-slate-400 sm:block">
               AI engineering assistant
