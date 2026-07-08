@@ -134,6 +134,79 @@ async def test_github_project_goes_ready_for_review(
     assert task2.status == TaskStatus.completed
 
 
+async def test_analyzed_project_uses_detected_test_command_and_no_tests_path(
+    session: AsyncSession, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from datetime import datetime, timezone
+
+    from app.core.config import settings
+    from app.core.enums import AnalysisStatus
+    from app.models import Project, ProjectAnalysis
+
+    project = Project(
+        name="GH2",
+        repo_url="https://github.com/acme/w2.git",
+        github_owner="acme",
+        github_repo="w2",
+    )
+    session.add(project)
+    await session.flush()
+    # Completed analysis that detected NO test command.
+    session.add(
+        ProjectAnalysis(
+            project_id=project.id,
+            status=AnalysisStatus.completed,
+            test_command=None,
+            finished_at=datetime.now(timezone.utc),
+            file_summaries=[],
+            suggestions=[],
+        )
+    )
+    task = Task(project_id=project.id, title="T", request="R")
+    session.add(task)
+    await session.commit()
+
+    async def fake_factory(_project):
+        return Workspace.create_from(settings.sample_repo_path)
+
+    service = RunService(
+        session, runner=MockRunner(delay=0), workspace_factory=fake_factory
+    )
+    run = await service.execute_agent_run(task.id)
+
+    # Honest no-tests path: ready for review, no fabricated results.
+    assert task.status == TaskStatus.ready_for_review
+    assert run.test_results == []
+    assert "No automated test command detected" in run.log
+    assert "WITHOUT test verification" in run.log
+
+    # Now with a detected command: it is actually executed.
+    # (sys.executable because the bare `python` of the container isn't
+    # guaranteed on dev machines.)
+    import sys
+
+    detected = f"{sys.executable} -m pytest -q"
+    session.add(
+        ProjectAnalysis(
+            project_id=project.id,
+            status=AnalysisStatus.completed,
+            test_command=detected,
+            finished_at=datetime.now(timezone.utc),
+            file_summaries=[],
+            suggestions=[],
+        )
+    )
+    task2 = Task(project_id=project.id, title="T2", request="R")
+    session.add(task2)
+    await session.commit()
+    run2 = await RunService(
+        session, runner=MockRunner(delay=0), workspace_factory=fake_factory
+    ).execute_agent_run(task2.id)
+    assert task2.status == TaskStatus.ready_for_review
+    assert run2.test_results[0].suite == detected
+    assert run2.test_results[0].passed == 7
+
+
 async def test_llm_mode_without_api_key_fails_cleanly(
     session: AsyncSession, task: Task, monkeypatch: pytest.MonkeyPatch
 ) -> None:

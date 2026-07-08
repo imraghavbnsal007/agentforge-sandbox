@@ -139,6 +139,33 @@ project is misconfigured; the token is injected via a git header (never stored
 in remotes or `.git/config`) and scrubbed from all logs and error messages.
 Projects without GitHub fields keep the plain sample-repo flow.
 
+## Repository intelligence
+
+The **Projects** page (http://localhost:3000/projects) registers and analyzes
+repositories:
+
+- **Register** — paste a GitHub URL (+ branch, default `main`). Registration is
+  lightweight: it validates the URL, checks the allowlist, verifies the repo and
+  branch are reachable (`git ls-remote`), and saves. No cloning, no AI calls.
+- **Analyze** — on the project page, *Analyze Repository* enqueues a worker job
+  that clones the repo and detects languages, frameworks, package manager,
+  build/test commands, and important files (deterministic heuristics), then —
+  in llm mode — asks Claude for a summary, architecture notes, risk areas,
+  per-file purposes, and improvement suggestions. Creating a project's *first
+  task* also triggers analysis automatically. Re-analyze any time; analyses are
+  kept as history.
+- **Create Task from Suggestion** — each suggestion links to a prefilled New
+  Task form.
+- **Detected test command** — tasks against an analyzed project run its
+  detected command (e.g. `npm test`) instead of assuming pytest. If analysis
+  found **no test command**, AgentForge does not fake results: the test phase
+  is skipped, the log and task page say
+  *"No automated test command detected"*, and the task still reaches
+  ready-for-review with an explicit unverified warning.
+
+Analysis never reads `.env*`, secret/credential/key files, `node_modules`,
+`venv`, `dist`, `build`, or binary files, and caps file sizes and counts.
+
 ## Tests
 
 ```bash

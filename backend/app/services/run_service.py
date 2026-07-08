@@ -6,7 +6,12 @@ from pathlib import Path
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.agent.executor import PytestExecutor, TestExecutor
+from app.agent.executor import (
+    CommandExecutor,
+    PytestExecutor,
+    TestExecutor,
+    TestResultData,
+)
 from app.agent.runner import AgentRunner, get_runner
 from app.agent.workspace import Workspace
 from app.core.config import settings
@@ -14,15 +19,11 @@ from app.core.enums import RunStatus, TaskStatus
 from app.core.exceptions import NotFoundError
 from app.models import AgentRun, FileChange, Project, Task, TestResult
 from app.services.git_client import GitClient
-from app.services.publisher import validate_github_project
+from app.services.github_config import is_github_project, validate_github_project
 
 logger = logging.getLogger(__name__)
 
 WorkspaceFactory = Callable[[Project], Awaitable[Workspace]]
-
-
-def is_github_project(project: Project) -> bool:
-    return bool(project.repo_url or project.github_owner or project.github_repo)
 
 
 async def create_workspace_for(project: Project) -> Workspace:
@@ -54,8 +55,22 @@ class RunService:
     ) -> None:
         self.session = session
         self._runner = runner
-        self._executor = executor or PytestExecutor()
+        self._executor = executor
         self._workspace_factory = workspace_factory or create_workspace_for
+
+    async def _resolve_executor(self, project: Project) -> TestExecutor | None:
+        """Pick the test executor; None means 'honestly skip tests'."""
+        if self._executor is not None:
+            return self._executor
+        if is_github_project(project):
+            from app.services.analysis_service import latest_completed_analysis
+
+            analysis = await latest_completed_analysis(self.session, project.id)
+            if analysis is not None:
+                if analysis.test_command:
+                    return CommandExecutor(analysis.test_command)
+                return None  # analyzed and no test command detected
+        return PytestExecutor()
 
     async def execute_agent_run(self, task_id: int) -> AgentRun:
         task = await self.session.get(Task, task_id)
@@ -119,23 +134,42 @@ class RunService:
             log(f"{len(changes)} file(s) changed")
             await self.session.commit()
 
-            await self._set_status(task, TaskStatus.testing)
-            tests = await self._executor.run_tests(workspace)
-            run.test_results.append(
-                TestResult(
-                    suite=tests.suite,
-                    passed=tests.passed,
-                    failed=tests.failed,
-                    errored=tests.errored,
-                    duration=tests.duration,
-                    output=tests.output,
-                    stderr=tests.stderr,
+            executor = await self._resolve_executor(project)
+            if executor is None:
+                tests = TestResultData(
+                    suite="none",
+                    passed=0,
+                    failed=0,
+                    errored=0,
+                    duration=0.0,
+                    output="No automated test command detected.",
+                    stderr="",
                 )
-            )
-            log(
-                f"tests: {tests.passed} passed, {tests.failed} failed, "
-                f"{tests.errored} errored in {tests.duration}s"
-            )
+                tests_ran = False
+                log(
+                    "No automated test command detected — skipping test phase "
+                    "(changes are unverified)"
+                )
+            else:
+                await self._set_status(task, TaskStatus.testing)
+                tests = await executor.run_tests(workspace)
+                tests_ran = True
+                run.test_results.append(
+                    TestResult(
+                        suite=tests.suite,
+                        passed=tests.passed,
+                        failed=tests.failed,
+                        errored=tests.errored,
+                        duration=tests.duration,
+                        output=tests.output,
+                        stderr=tests.stderr,
+                    )
+                )
+                log(
+                    f"tests ({tests.suite}): {tests.passed} passed, "
+                    f"{tests.failed} failed, {tests.errored} errored "
+                    f"in {tests.duration}s"
+                )
             await self.session.commit()
 
             run.summary = await runner.summarize(
@@ -146,7 +180,13 @@ class RunService:
             tests_green = tests.failed == 0 and tests.errored == 0
             if is_github_project(project) and tests_green and changes:
                 task.status = TaskStatus.ready_for_review
-                log("tests passed — ready for review; approve to create a pull request")
+                if tests_ran:
+                    log("tests passed — ready for review; approve to create a pull request")
+                else:
+                    log(
+                        "ready for review WITHOUT test verification — "
+                        "review the diff carefully before approving"
+                    )
             else:
                 task.status = TaskStatus.completed
                 if is_github_project(project):
@@ -159,6 +199,8 @@ class RunService:
             await self.session.commit()
         except Exception as exc:
             logger.exception("Agent run failed for task %s", task_id)
+            # A flush error leaves the session unusable until rolled back.
+            await self.session.rollback()
             log(f"run failed: {exc}")
             run.status = RunStatus.failed
             run.error = str(exc)

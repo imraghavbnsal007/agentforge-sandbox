@@ -3,4 +3,12 @@ class NotFoundError(Exception):
 
 
 class ConflictError(Exception):
-    """Entity violates a uniqueness constraint. Mapped to HTTP 409."""
+    """Entity violates a uniqueness or state constraint. Mapped to HTTP 409."""
+
+
+class InvalidInputError(Exception):
+    """Input failed validation beyond schema checks. Mapped to HTTP 422."""
+
+
+class ForbiddenError(Exception):
+    """Action refused by policy (e.g. repo allowlist). Mapped to HTTP 403."""

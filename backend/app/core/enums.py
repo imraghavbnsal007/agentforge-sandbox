@@ -28,3 +28,10 @@ class ChangeType(StrEnum):
 class AgentMode(StrEnum):
     mock = "mock"
     llm = "llm"
+
+
+class AnalysisStatus(StrEnum):
+    pending = "pending"
+    running = "running"
+    completed = "completed"
+    failed = "failed"

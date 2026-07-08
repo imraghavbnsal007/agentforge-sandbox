@@ -148,19 +148,25 @@ async def test_publish_service_happy_path(
 async def test_publish_failure_returns_to_review(
     session: AsyncSession, monkeypatch: pytest.MonkeyPatch
 ):
+    from app.repositories.task_repo import TaskRepository
+
     monkeypatch.setattr(settings, "github_token", "tok")
     task = await _make_github_task(session, TaskStatus.publishing)
+    task_id = task.id
 
     # Fresh-clone verification tests fail -> publish refused.
     publisher = GitHubPublisher(
         git=FakeGit(), api=FakeAPI(), executor=FakeExecutor(passed=1, failed=2)
     )
-    await PublishService(session, publisher=publisher).publish_task(task.id)
+    await PublishService(session, publisher=publisher).publish_task(task_id)
 
+    # The failure path rolls the session back, so reload state explicitly.
+    task = await TaskRepository(session).get_with_runs(task_id)
     assert task.status == TaskStatus.ready_for_review
     run = task.runs[-1]
     assert "no longer pass tests" in run.error
     assert run.pr_url is None
+    assert "publish failed" in run.log
 
 
 async def test_publish_skipped_unless_publishing(session: AsyncSession):

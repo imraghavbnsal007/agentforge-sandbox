@@ -12,18 +12,34 @@ from app.main import create_app
 from app.models import Project, Task
 
 
+@pytest.fixture(autouse=True)
+def _neutral_github_settings(monkeypatch: pytest.MonkeyPatch):
+    """Isolate tests from the host/container's real GitHub configuration.
+
+    Tests that need an allowlist or token set their own via monkeypatch.
+    """
+    from app.core.config import settings
+
+    monkeypatch.setattr(settings, "github_allowed_repos", "")
+    yield
+
+
 class FakeQueue:
     """Records enqueued task ids instead of talking to Redis."""
 
     def __init__(self) -> None:
         self.enqueued: list[int] = []
         self.publish_enqueued: list[int] = []
+        self.analyze_enqueued: list[int] = []
 
     async def enqueue_run_agent(self, task_id: int) -> None:
         self.enqueued.append(task_id)
 
     async def enqueue_publish_task(self, task_id: int) -> None:
         self.publish_enqueued.append(task_id)
+
+    async def enqueue_analyze_project(self, analysis_id: int) -> None:
+        self.analyze_enqueued.append(analysis_id)
 
 
 @pytest.fixture

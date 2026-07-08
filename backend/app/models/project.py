@@ -7,6 +7,7 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 from app.db.base import Base
 
 if TYPE_CHECKING:
+    from app.models.project_analysis import ProjectAnalysis
     from app.models.task import Task
 
 
@@ -28,4 +29,7 @@ class Project(Base):
 
     tasks: Mapped[list["Task"]] = relationship(
         back_populates="project", cascade="all, delete-orphan"
+    )
+    analyses: Mapped[list["ProjectAnalysis"]] = relationship(
+        back_populates="project", cascade="all, delete-orphan", order_by="ProjectAnalysis.id"
     )

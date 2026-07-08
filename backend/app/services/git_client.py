@@ -60,6 +60,17 @@ class GitClient:
             raise GitError(f"git {args[0]} failed: {detail}")
         return self._scrub(proc.stdout)
 
+    async def ls_remote(self, repo_url: str, branch: str) -> None:
+        """Verify the repo is reachable (auth ok) and the branch exists."""
+        out = await self._run(
+            [*self._auth_args(repo_url), "ls-remote", "--heads", repo_url, branch]
+        )
+        if not out.strip():
+            raise GitError(
+                f"Branch {branch!r} not found on the repository "
+                "(repo reachable, but the branch does not exist)"
+            )
+
     async def clone(self, repo_url: str, dest: Path, branch: str) -> None:
         await self._run(
             [

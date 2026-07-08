@@ -4,7 +4,12 @@ import { getProjects } from "@/lib/api";
 
 export const dynamic = "force-dynamic";
 
-export default async function NewTaskPage() {
+export default async function NewTaskPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ project?: string; title?: string; request?: string }>;
+}) {
+  const params = await searchParams;
   const projects = await getProjects();
 
   return (
@@ -24,7 +29,12 @@ export default async function NewTaskPage() {
         </div>
       ) : (
         <div className="rounded-lg border border-slate-200 bg-white p-6">
-          <NewTaskForm projects={projects} />
+          <NewTaskForm
+            projects={projects}
+            defaultProjectId={params.project ? Number(params.project) : undefined}
+            defaultTitle={params.title}
+            defaultRequest={params.request}
+          />
         </div>
       )}
     </div>

@@ -38,12 +38,65 @@ export interface AppConfig {
   github_token_configured: boolean;
 }
 
+export type AnalysisStatus = "pending" | "running" | "completed" | "failed";
+
 export interface Project {
   id: number;
   name: string;
   description: string;
   repo_path: string;
+  repo_url: string | null;
+  default_branch: string;
+  github_owner: string | null;
+  github_repo: string | null;
   created_at: string;
+  analysis_status: AnalysisStatus | null;
+  last_analyzed_at: string | null;
+  primary_language: string | null;
+  framework: string | null;
+  test_command: string | null;
+}
+
+export interface FileSummary {
+  id: number;
+  file_path: string;
+  file_type: string;
+  purpose: string;
+  importance_score: number;
+}
+
+export interface Suggestion {
+  id: number;
+  title: string;
+  description: string;
+  category: string;
+  priority: string;
+  related_files: string[] | null;
+}
+
+export interface Analysis {
+  id: number;
+  project_id: number;
+  status: AnalysisStatus;
+  summary: string | null;
+  languages: string[] | null;
+  frameworks: string[] | null;
+  dependencies: string[] | null;
+  package_manager: string | null;
+  build_command: string | null;
+  test_command: string | null;
+  architecture_notes: string | null;
+  risk_areas: string | null;
+  analysis_logs: string | null;
+  error: string | null;
+  started_at: string;
+  finished_at: string | null;
+  file_summaries: FileSummary[];
+  suggestions: Suggestion[];
+}
+
+export interface ProjectDetail extends Project {
+  latest_analysis: Analysis | null;
 }
 
 export interface FileChange {
@@ -109,6 +162,39 @@ export function getProjects(): Promise<Project[]> {
 
 export function getConfig(): Promise<AppConfig> {
   return get<AppConfig>("/api/v1/config");
+}
+
+export function getProject(id: string | number): Promise<ProjectDetail> {
+  return get<ProjectDetail>(`/api/v1/projects/${id}`);
+}
+
+/** Browser-side: register a GitHub repo as a project (validation only, no analysis). */
+export async function registerProject(input: {
+  repo_url: string;
+  default_branch: string;
+}): Promise<Project> {
+  const res = await fetch(`${PUBLIC_API_URL}/api/v1/projects/register`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(input),
+  });
+  if (!res.ok) {
+    const body = await res.json().catch(() => null);
+    throw new Error(body?.detail ?? `Registration failed with ${res.status}`);
+  }
+  return res.json();
+}
+
+/** Browser-side: enqueue a repository analysis. */
+export async function analyzeProject(id: number): Promise<Analysis> {
+  const res = await fetch(`${PUBLIC_API_URL}/api/v1/projects/${id}/analyze`, {
+    method: "POST",
+  });
+  if (!res.ok) {
+    const body = await res.json().catch(() => null);
+    throw new Error(body?.detail ?? `Analyze failed with ${res.status}`);
+  }
+  return res.json();
 }
 
 async function postAction(id: number, action: string): Promise<Task> {

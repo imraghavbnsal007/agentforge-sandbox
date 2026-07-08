@@ -4,11 +4,24 @@ import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { createTask, type Project } from "@/lib/api";
 
-export function NewTaskForm({ projects }: { projects: Project[] }) {
+export function NewTaskForm({
+  projects,
+  defaultProjectId,
+  defaultTitle,
+  defaultRequest,
+}: {
+  projects: Project[];
+  defaultProjectId?: number;
+  defaultTitle?: string;
+  defaultRequest?: string;
+}) {
   const router = useRouter();
-  const [projectId, setProjectId] = useState(projects[0]?.id ?? 0);
-  const [title, setTitle] = useState("");
-  const [request, setRequest] = useState("");
+  const validDefault = projects.some((p) => p.id === defaultProjectId)
+    ? defaultProjectId
+    : undefined;
+  const [projectId, setProjectId] = useState(validDefault ?? projects[0]?.id ?? 0);
+  const [title, setTitle] = useState(defaultTitle ?? "");
+  const [request, setRequest] = useState(defaultRequest ?? "");
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
 

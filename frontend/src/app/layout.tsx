@@ -16,7 +16,12 @@ export default function RootLayout({
           <div className="mx-auto flex max-w-5xl items-center gap-3 px-6 py-4">
             <span className="text-xl">⚒️</span>
             <h1 className="text-lg font-semibold tracking-tight">AgentForge</h1>
-            <span className="ml-auto text-sm text-slate-400">
+            <nav className="ml-6 flex items-center gap-4 text-sm text-slate-600">
+              <a href="/" className="hover:text-slate-900">Dashboard</a>
+              <a href="/projects" className="hover:text-slate-900">Projects</a>
+              <a href="/tasks/new" className="hover:text-slate-900">New Task</a>
+            </nav>
+            <span className="ml-auto hidden text-sm text-slate-400 sm:block">
               AI engineering assistant
             </span>
           </div>

@@ -57,5 +57,12 @@ GET  /api/v1/tasks/{id}       includes latest run + file changes + test results
    edit loop + summary call on claude-opus-4-8), execution log on AgentRun,
    New Task page, Task Detail page (request / plan / log / diffs / tests /
    summary). Single intelligent agent only — no multi-agent split yet.
-3. GitHub integration, auth, retries, streaming updates; split into
-   Planner/Coder/Reviewer/QA only once the single agent is reliable.
+3. **Done:** review-gated GitHub PR workflow (see Phase 3 commit) and
+   repository intelligence (Phase 4): lightweight register flow (validate +
+   ls-remote only), analyze-on-demand ARQ job (heuristic facts + optional
+   Claude enrichment), ProjectAnalysis/RepoFileSummary/RepoImprovementSuggestion
+   tables, Projects + Project Detail pages, create-task-from-suggestion,
+   detected test command feeds the run pipeline and publish gate, honest
+   "no test command detected" path with unverified-review warning.
+4. Auth, retries, streaming updates; split into Planner/Coder/Reviewer/QA
+   only once the single agent is reliable.

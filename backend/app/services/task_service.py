@@ -1,11 +1,13 @@
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.enums import TaskStatus
 from app.core.exceptions import ConflictError, NotFoundError
-from app.models import Task
+from app.models import ProjectAnalysis, Task
 from app.repositories.project_repo import ProjectRepository
 from app.repositories.task_repo import TaskRepository
 from app.schemas.task import TaskCreate
+from app.services.github_config import is_github_project
 from app.worker.queue import JobQueue
 
 
@@ -17,13 +19,29 @@ class TaskService:
         self.projects = ProjectRepository(session)
 
     async def create_task(self, data: TaskCreate) -> Task:
-        if await self.projects.get(data.project_id) is None:
+        project = await self.projects.get(data.project_id)
+        if project is None:
             raise NotFoundError(f"Project {data.project_id} not found")
         task = Task(project_id=data.project_id, title=data.title, request=data.request)
         self.tasks.add(task)
         await self.session.commit()
         await self.session.refresh(task)
         await self.queue.enqueue_run_agent(task.id)
+        # First task on a never-analyzed GitHub project also kicks off analysis
+        # (the explicit alternative to the Analyze button).
+        if is_github_project(project):
+            count = await self.session.scalar(
+                select(func.count(ProjectAnalysis.id)).where(
+                    ProjectAnalysis.project_id == project.id
+                )
+            )
+            if count == 0:
+                analysis = ProjectAnalysis(
+                    project_id=project.id, file_summaries=[], suggestions=[]
+                )
+                self.session.add(analysis)
+                await self.session.commit()
+                await self.queue.enqueue_analyze_project(analysis.id)
         return task
 
     async def list_tasks(self, project_id: int | None = None) -> list[Task]:

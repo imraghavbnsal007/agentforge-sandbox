@@ -83,6 +83,16 @@ export default async function TaskDetailPage({
         </div>
       )}
 
+      {task.status === "ready_for_review" &&
+        run &&
+        run.test_results.length === 0 && (
+          <div className="rounded-lg border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-800">
+            <span className="font-medium">No automated test command detected.</span>{" "}
+            These changes have not been verified by tests — review the diff
+            carefully before approving.
+          </div>
+        )}
+
       {task.status === "ready_for_review" && <ReviewActions taskId={task.id} />}
 
       {task.status === "publishing" && (
