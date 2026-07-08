@@ -167,8 +167,29 @@ export default async function TaskDetailPage({
                   <span className="rounded bg-slate-200 px-1.5 py-0.5 text-[10px] font-medium uppercase text-slate-600">
                     {change.change_type}
                   </span>
+                  {change.is_binary && (
+                    <span className="rounded bg-amber-100 px-1.5 py-0.5 text-[10px] font-medium uppercase text-amber-700">
+                      binary
+                    </span>
+                  )}
                 </div>
-                <DiffView diff={change.diff} />
+                {change.is_binary ? (
+                  <div className="bg-slate-50 px-4 py-3 text-xs text-slate-500">
+                    Binary file changed — textual diff unavailable.
+                    {change.size_bytes != null && (
+                      <span className="ml-2 text-slate-400">
+                        {(change.size_bytes / 1024).toFixed(1)} KB
+                      </span>
+                    )}
+                    {change.content_hash && (
+                      <span className="ml-2 font-mono text-slate-400">
+                        sha256:{change.content_hash.slice(0, 12)}…
+                      </span>
+                    )}
+                  </div>
+                ) : (
+                  <DiffView diff={change.diff} />
+                )}
               </div>
             ))}
           </div>

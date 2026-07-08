@@ -21,7 +21,7 @@ from app.agent.executor import PytestExecutor, TestExecutor
 from app.agent.runner import LogFn
 from app.agent.workspace import Workspace
 from app.core.config import settings
-from app.core.enums import RunStatus, TaskStatus
+from app.core.enums import ChangeType, RunStatus, TaskStatus
 from app.core.exceptions import NotFoundError
 from app.models import AgentRun, Project, Task
 from app.services.git_client import GitClient
@@ -81,6 +81,18 @@ class GitHubPublisher:
             log(f"created branch {branch}")
 
             for change in run.file_changes:
+                if change.is_binary:
+                    # Binary contents are not stored, so only deletions can be
+                    # reproduced at publish time.
+                    if change.change_type == ChangeType.delete:
+                        await self.git.delete_path(clone_dir, change.path)
+                        log(f"removed binary file: {change.path}")
+                        continue
+                    raise PublishError(
+                        f"Run {change.change_type}s binary file {change.path!r}; "
+                        "binary contents are not stored and cannot be published. "
+                        "Make the change directly in the repository instead."
+                    )
                 await self.git.apply_diff(clone_dir, change.diff)
                 log(f"applied diff: {change.path}")
 

@@ -1,6 +1,6 @@
 from typing import TYPE_CHECKING
 
-from sqlalchemy import ForeignKey, String, Text
+from sqlalchemy import Boolean, ForeignKey, Integer, String, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.core.enums import ChangeType
@@ -20,5 +20,9 @@ class FileChange(Base):
     path: Mapped[str] = mapped_column(String(500))
     change_type: Mapped[ChangeType] = mapped_column(str_enum(ChangeType))
     diff: Mapped[str] = mapped_column(Text, default="")
+    # Binary changes store metadata only; diff stays empty.
+    is_binary: Mapped[bool] = mapped_column(Boolean, default=False)
+    size_bytes: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    content_hash: Mapped[str | None] = mapped_column(String(64), nullable=True)
 
     run: Mapped["AgentRun"] = relationship(back_populates="file_changes")

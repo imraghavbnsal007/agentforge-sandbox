@@ -150,6 +150,9 @@ export interface FileChange {
   path: string;
   change_type: ChangeType;
   diff: string;
+  is_binary: boolean;
+  size_bytes: number | null;
+  content_hash: string | null;
 }
 
 export interface TestResult {

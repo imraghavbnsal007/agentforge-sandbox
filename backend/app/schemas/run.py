@@ -12,6 +12,9 @@ class FileChangeRead(BaseModel):
     path: str
     change_type: ChangeType
     diff: str
+    is_binary: bool
+    size_bytes: int | None
+    content_hash: str | None
 
 
 class TestResultRead(BaseModel):

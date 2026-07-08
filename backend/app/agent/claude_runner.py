@@ -69,7 +69,11 @@ def _repo_context(workspace: Workspace) -> str:
     parts = []
     total = 0
     for path in workspace.list_files():
-        content = workspace.read_file(path)
+        try:
+            content = workspace.read_file(path)
+        except WorkspaceError:
+            parts.append(f"### {path}\n(binary file — content omitted)")
+            continue
         total += len(content)
         if total > MAX_CONTEXT_CHARS:
             parts.append(f"### {path}\n(omitted — context limit reached)")

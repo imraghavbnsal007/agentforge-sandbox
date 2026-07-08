@@ -96,6 +96,9 @@ class GitClient:
             diff += "\n"
         await self._run(["apply", "--whitespace=nowarn"], cwd=cwd, stdin=diff)
 
+    async def delete_path(self, cwd: Path, rel_path: str) -> None:
+        await self._run(["rm", "-q", "--", rel_path], cwd=cwd)
+
     async def commit_all(self, cwd: Path, message: str) -> str:
         await self._run(["add", "-A"], cwd=cwd)
         await self._run(["commit", "-m", message], cwd=cwd)

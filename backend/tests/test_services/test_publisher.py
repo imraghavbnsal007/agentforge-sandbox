@@ -23,6 +23,7 @@ class FakeGit:
     def __init__(self) -> None:
         self.pushed: list[str] = []
         self.applied: list[str] = []
+        self.deleted: list[str] = []
 
     async def clone(self, repo_url: str, dest: Path, branch: str) -> None:
         shutil.copytree(settings.sample_repo_path, dest, dirs_exist_ok=True)
@@ -32,6 +33,9 @@ class FakeGit:
 
     async def apply_diff(self, cwd: Path, diff: str) -> None:
         self.applied.append(diff)
+
+    async def delete_path(self, cwd: Path, rel_path: str) -> None:
+        self.deleted.append(rel_path)
 
     async def commit_all(self, cwd: Path, message: str) -> str:
         return "a" * 40
@@ -167,6 +171,70 @@ async def test_publish_failure_returns_to_review(
     assert "no longer pass tests" in run.error
     assert run.pr_url is None
     assert "publish failed" in run.log
+
+
+async def test_publish_binary_delete_uses_git_rm(
+    session: AsyncSession, monkeypatch: pytest.MonkeyPatch
+):
+    from app.repositories.task_repo import TaskRepository
+
+    monkeypatch.setattr(settings, "github_token", "tok")
+    task = await _make_github_task(session, TaskStatus.publishing)
+    # Re-fetch with runs + file_changes eagerly loaded (async session).
+    task = await TaskRepository(session).get_with_runs(task.id)
+    run = task.runs[-1]
+    run.file_changes.append(
+        FileChange(
+            path="old-archive.zip",
+            change_type="delete",
+            diff="",
+            is_binary=True,
+            size_bytes=123,
+            content_hash="a" * 64,
+        )
+    )
+    await session.commit()
+
+    git, api = FakeGit(), FakeAPI()
+    publisher = GitHubPublisher(git=git, api=api, executor=FakeExecutor())
+    await PublishService(session, publisher=publisher).publish_task(task.id)
+
+    task = await TaskRepository(session).get_with_runs(task.id)
+    assert task.status == TaskStatus.completed
+    assert git.deleted == ["old-archive.zip"]
+    # The binary change's empty diff never went through git apply.
+    assert all(d for d in git.applied)
+
+
+async def test_publish_binary_create_fails_clearly(
+    session: AsyncSession, monkeypatch: pytest.MonkeyPatch
+):
+    from app.repositories.task_repo import TaskRepository
+
+    monkeypatch.setattr(settings, "github_token", "tok")
+    task = await _make_github_task(session, TaskStatus.publishing)
+    # Re-fetch with runs + file_changes eagerly loaded (async session).
+    task = await TaskRepository(session).get_with_runs(task.id)
+    run = task.runs[-1]
+    run.file_changes.append(
+        FileChange(
+            path="generated.png",
+            change_type="create",
+            diff="",
+            is_binary=True,
+            size_bytes=456,
+            content_hash="b" * 64,
+        )
+    )
+    await session.commit()
+
+    publisher = GitHubPublisher(git=FakeGit(), api=FakeAPI(), executor=FakeExecutor())
+    await PublishService(session, publisher=publisher).publish_task(task.id)
+
+    task = await TaskRepository(session).get_with_runs(task.id)
+    assert task.status == TaskStatus.ready_for_review
+    assert "binary" in task.runs[-1].error
+    assert "generated.png" in task.runs[-1].error
 
 
 async def test_publish_skipped_unless_publishing(session: AsyncSession):

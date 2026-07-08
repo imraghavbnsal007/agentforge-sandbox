@@ -129,8 +129,16 @@ class RunService:
                         path=change.path,
                         change_type=change.change_type,
                         diff=change.diff,
+                        is_binary=change.is_binary,
+                        size_bytes=change.size_bytes,
+                        content_hash=change.content_hash,
                     )
                 )
+                if change.is_binary:
+                    log(
+                        f"binary file {change.change_type}: {change.path} "
+                        "(metadata only — textual diff unavailable)"
+                    )
             log(f"{len(changes)} file(s) changed")
             await self.session.commit()
 

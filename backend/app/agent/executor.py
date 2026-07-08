@@ -60,6 +60,10 @@ class CommandExecutor:
             returncode = -1
         duration = time.monotonic() - start
 
+        # NUL bytes (e.g. from a test runner cat-ing a binary) are rejected
+        # by PostgreSQL text columns.
+        stdout = (stdout or "").replace("\x00", "")
+        stderr = (stderr or "").replace("\x00", "")
         combined = stdout + "\n" + stderr
         passed = _count(r"(\d+) passed", combined) or _count(r"(\d+) passing", combined)
         failed = _count(r"(\d+) failed", combined) or _count(r"(\d+) failing", combined)
