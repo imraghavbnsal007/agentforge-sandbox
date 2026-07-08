@@ -21,27 +21,61 @@ from app.models import (
     RepoFileSummary,
     RepoImprovementSuggestion,
 )
+from app.services.archive_extractor import extract_archives
 from app.services.git_client import GitClient
 from app.services.github_config import validate_github_project
 from app.services.repo_facts import RepoFacts, collect_repo_facts, read_text_safely
+from app.services.repo_insights import (
+    UNKNOWN,
+    build_repo_map,
+    detect_api_routes,
+    detect_entry_points,
+    detect_project_type,
+    score_health,
+)
+from app.services.sql_analyzer import (
+    analyze_sql,
+    deterministic_findings,
+    schema_summary,
+    schema_to_json,
+)
 
 logger = logging.getLogger(__name__)
 
 VALID_CATEGORIES = {"testing", "docs", "structure", "security", "quality"}
 VALID_PRIORITIES = {"high", "medium", "low"}
+VALID_CONFIDENCE = {"high", "medium", "low"}
+VALID_EFFORT = {"small", "medium", "large"}
 MAX_EXCERPT_FILES = 12
 MAX_EXCERPT_CHARS = 3000
 
 ENRICH_PROMPT = """You are analyzing a software repository to build an engineering brief.
 
-Repository facts (heuristically detected):
+STRICT GROUNDING RULES:
+- Base every statement ONLY on the facts, file list, and excerpts below.
+- Never invent frameworks, architecture, files, tables, or behavior.
+- If a field cannot be determined from the material, use exactly this string:
+  "Unable to determine from repository."
+- Every suggestion MUST cite at least one real file from the file list and
+  describe something concrete and checkable in that file. A vague suggestion
+  like "improve code quality" is worthless; "table X in file Y lacks Z" is right.
+
+Repository facts (deterministically detected — trust these):
+- Project type: {project_type}
 - Languages: {languages}
 - Frameworks: {frameworks}
 - Package manager: {package_manager}
 - Test command: {test_command}
 - Build command: {build_command}
+- Entry points: {entry_points}
 - Files ({file_count}{truncated}):
 {file_tree}
+
+SQL schema (parsed from the .sql files; empty if not a SQL project):
+{schema_summary}
+
+Findings already detected deterministically (do not repeat these):
+{findings}
 
 README (may be empty):
 {readme}
@@ -49,24 +83,38 @@ README (may be empty):
 Key file excerpts:
 {excerpts}
 
+If this is a SQL project, compare the parsed schema against the README's
+business rules and flag rules that have no enforcing constraint, citing the
+table and file (e.g. a numeric limit with no CHECK, a domain with no CHECK or
+lookup table, a derived value with no trigger/procedure).
+
 Respond with ONLY a JSON object (no markdown fences) with exactly these keys:
 - "summary": 2-4 sentences: what this project is and its purpose.
-- "architecture_notes": 2-5 sentences on how the code is organized and flows.
-- "risk_areas": 1-4 sentences on missing tests, weak spots, or fragile areas.
+- "architecture_notes": 2-5 sentences on how the pieces are organized and interact.
+- "risk_areas": 1-4 sentences on weak spots, grounded in specific files/tables.
 - "files": array of the 5-15 most important files, each
   {{"path": str, "file_type": one of "entrypoint"|"config"|"core"|"docs"|"tests"|"infra"|"ci",
     "purpose": one sentence, "importance": integer 0-100}}.
-- "suggestions": array of 3-6 concrete improvements, each
-  {{"title": short imperative phrase, "description": 1-3 sentences,
+- "suggestions": array of 3-8 concrete improvements, each
+  {{"title": short imperative phrase naming the file/table concerned,
+    "description": 1-3 sentences describing exactly what is missing or wrong,
     "category": one of "testing"|"docs"|"structure"|"security"|"quality",
-    "priority": "high"|"medium"|"low", "related_files": array of paths}}.
+    "priority": "high"|"medium"|"low",
+    "confidence": "high"|"medium"|"low" — how certain you are given the evidence,
+    "effort": "small"|"medium"|"large",
+    "reasoning": one or two sentences citing the evidence (file, statement, README rule),
+    "related_files": non-empty array of paths from the file list}}.
 Only reference paths that appear in the file list."""
 
 
 def _facts_excerpts(root: Path, facts: RepoFacts) -> str:
     parts = []
     seen: set[str] = set()
-    candidates = [path for path, *_ in facts.important_files] + facts.files
+    # SQL files and README first — they carry the most analyzable signal.
+    sql_files = [f for f in facts.files if f.endswith(".sql")]
+    candidates = (
+        sql_files + [path for path, *_ in facts.important_files] + facts.files
+    )
     for rel_path in candidates:
         if rel_path in seen or len(seen) >= MAX_EXCERPT_FILES:
             continue
@@ -96,18 +144,25 @@ class ClaudeRepoAnalyst:
         self.client = client
         self.model = model or settings.anthropic_model
 
-    async def enrich(self, root: Path, facts: RepoFacts) -> dict:
+    async def enrich(
+        self, root: Path, facts: RepoFacts, context: dict | None = None
+    ) -> dict:
         import anthropic
 
+        context = context or {}
         prompt = ENRICH_PROMPT.format(
-            languages=", ".join(facts.languages) or "unknown",
+            project_type=context.get("project_type") or UNKNOWN,
+            languages=", ".join(facts.languages) or "none detected",
             frameworks=", ".join(facts.frameworks) or "none detected",
             package_manager=facts.package_manager or "none detected",
             test_command=facts.test_command or "none detected",
             build_command=facts.build_command or "none detected",
+            entry_points=", ".join(context.get("entry_points") or []) or "none detected",
             file_count=len(facts.files),
             truncated=", truncated" if facts.truncated else "",
             file_tree="\n".join(f"  {f}" for f in facts.files),
+            schema_summary=context.get("schema_summary") or "(not a SQL project)",
+            findings=context.get("findings") or "(none)",
             readme=facts.readme or "(no README)",
             excerpts=_facts_excerpts(root, facts) or "(none)",
         )
@@ -209,6 +264,13 @@ class AnalysisService:
             await git.clone(project.repo_url, clone_dir, project.default_branch)
             log(f"cloned {project.github_owner}/{project.github_repo}")
 
+            extracted = await asyncio.to_thread(extract_archives, clone_dir)
+            for archive_path, count in extracted:
+                log(
+                    f"extracted archive {archive_path} ({count} files) — "
+                    "analysis only, never committed"
+                )
+
             facts = await asyncio.to_thread(collect_repo_facts, clone_dir)
             log(
                 f"heuristics: {len(facts.files)} files, "
@@ -222,6 +284,56 @@ class AnalysisService:
             analysis.package_manager = facts.package_manager
             analysis.build_command = facts.build_command
             analysis.test_command = facts.test_command
+
+            # SQL schema analysis (grounded, regex-parsed).
+            sql_files = {}
+            for rel in facts.files:
+                if rel.endswith(".sql"):
+                    text = read_text_safely(clone_dir, rel)
+                    if text is not None:
+                        sql_files[rel] = text
+            schema = analyze_sql(sql_files)
+            findings: list[dict] = []
+            if schema is not None:
+                analysis.sql_schema = schema_to_json(schema)
+                analysis.schema_summary = schema_summary(schema)
+                findings = deterministic_findings(schema)
+                log(
+                    f"SQL schema: {len(schema.tables)} tables, "
+                    f"{len(schema.views)} views, {len(schema.procedures)} procedures, "
+                    f"{len(schema.triggers)} triggers, {len(schema.indexes)} indexes"
+                )
+
+            # Deterministic insights.
+            routes = await asyncio.to_thread(detect_api_routes, clone_dir, facts)
+            analysis.api_routes = routes or None
+            analysis.entry_points = detect_entry_points(facts) or None
+            analysis.project_type = detect_project_type(facts, schema)
+            analysis.repo_map = build_repo_map(facts, schema, routes)
+            health = await asyncio.to_thread(score_health, facts, schema, clone_dir)
+            analysis.health_score = health["overall"]
+            analysis.health_breakdown = health["breakdown"]
+            log(
+                f"insights: type={analysis.project_type!r}, "
+                f"{len(routes)} API routes, health score {health['overall']}/100"
+            )
+
+            for finding in findings:
+                analysis.suggestions.append(
+                    RepoImprovementSuggestion(
+                        title=finding["title"][:300],
+                        description=finding["description"],
+                        category=finding["category"],
+                        priority=finding["priority"],
+                        confidence=finding["confidence"],
+                        effort=finding["effort"],
+                        reasoning=finding["reasoning"],
+                        related_files=finding["related_files"],
+                    )
+                )
+            if findings:
+                log(f"{len(findings)} deterministic finding(s) recorded")
+
             for path, ftype, score, purpose in facts.important_files:
                 analysis.file_summaries.append(
                     RepoFileSummary(
@@ -238,11 +350,18 @@ class AnalysisService:
                 analyst = ClaudeRepoAnalyst()
             if analyst is not None:
                 log(f"AI enrichment via {settings.anthropic_model}")
-                data = await analyst.enrich(clone_dir, facts)
-                self._apply_enrichment(analysis, data, set(facts.files))
+                context = {
+                    "project_type": analysis.project_type,
+                    "entry_points": analysis.entry_points,
+                    "schema_summary": analysis.schema_summary,
+                    "findings": "\n".join(f"- {f['title']}" for f in findings),
+                }
+                data = await analyst.enrich(clone_dir, facts, context)
+                dropped = self._apply_enrichment(analysis, data, set(facts.files))
                 log(
                     f"enrichment done: {len(analysis.file_summaries)} file summaries, "
                     f"{len(analysis.suggestions)} suggestions"
+                    + (f" ({dropped} ungrounded suggestion(s) dropped)" if dropped else "")
                 )
             else:
                 analysis.summary = (
@@ -273,7 +392,8 @@ class AnalysisService:
 
     def _apply_enrichment(
         self, analysis: ProjectAnalysis, data: dict, known_files: set[str]
-    ) -> None:
+    ) -> int:
+        """Apply validated enrichment; returns the number of dropped suggestions."""
         analysis.summary = str(data.get("summary") or "")[:2000] or analysis.summary
         analysis.architecture_notes = str(data.get("architecture_notes") or "")[:4000]
         analysis.risk_areas = str(data.get("risk_areas") or "")[:4000]
@@ -298,20 +418,36 @@ class AnalysisService:
                     )
                 )
 
+        dropped = 0
+        existing_titles = {s.title.lower() for s in analysis.suggestions}
         for item in data.get("suggestions") or []:
             if not isinstance(item, dict) or not item.get("title"):
+                dropped += 1
                 continue
-            category = str(item.get("category") or "quality").lower()
-            priority = str(item.get("priority") or "medium").lower()
             related = [
                 str(f) for f in (item.get("related_files") or []) if str(f) in known_files
             ]
+            if not related:
+                # Suggestions must reference actual files — ungrounded ones go.
+                dropped += 1
+                continue
+            title = str(item["title"])[:300]
+            if title.lower() in existing_titles:
+                continue  # deterministic finding already covers it
+            category = str(item.get("category") or "quality").lower()
+            priority = str(item.get("priority") or "medium").lower()
+            confidence = str(item.get("confidence") or "medium").lower()
+            effort = str(item.get("effort") or "medium").lower()
             analysis.suggestions.append(
                 RepoImprovementSuggestion(
-                    title=str(item["title"])[:300],
+                    title=title,
                     description=str(item.get("description") or "")[:2000],
                     category=category if category in VALID_CATEGORIES else "quality",
                     priority=priority if priority in VALID_PRIORITIES else "medium",
+                    confidence=confidence if confidence in VALID_CONFIDENCE else "medium",
+                    effort=effort if effort in VALID_EFFORT else "medium",
+                    reasoning=str(item.get("reasoning") or "")[:2000],
                     related_files=related,
                 )
             )
+        return dropped

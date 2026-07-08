@@ -24,6 +24,9 @@ class SuggestionRead(BaseModel):
     category: str
     priority: str
     related_files: list[str] | None
+    confidence: str
+    reasoning: str
+    effort: str
 
 
 class AnalysisRead(BaseModel):
@@ -41,6 +44,14 @@ class AnalysisRead(BaseModel):
     test_command: str | None
     architecture_notes: str | None
     risk_areas: str | None
+    project_type: str | None
+    entry_points: list[str] | None
+    api_routes: list[dict] | None
+    repo_map: list[dict] | None
+    sql_schema: dict | None
+    schema_summary: str | None
+    health_score: int | None
+    health_breakdown: dict | None
     analysis_logs: str | None
     error: str | None
     started_at: datetime

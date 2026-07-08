@@ -2,7 +2,9 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { AnalysisStatusBadge } from "@/components/AnalysisStatusBadge";
 import { AutoRefresh } from "@/components/AutoRefresh";
+import { HealthScore } from "@/components/HealthScore";
 import { ReanalyzeButton } from "@/components/ReanalyzeButton";
+import { RepoMapTree } from "@/components/RepoMapTree";
 import { getProject, type ProjectDetail } from "@/lib/api";
 
 export const dynamic = "force-dynamic";
@@ -62,6 +64,11 @@ export default async function ProjectDetailPage({
         <div className="mt-2 flex flex-wrap items-center gap-3">
           <h2 className="text-2xl font-semibold tracking-tight">{project.name}</h2>
           <AnalysisStatusBadge status={project.analysis_status} />
+          {analysis?.project_type && (
+            <span className="rounded-full bg-slate-800 px-2.5 py-0.5 text-xs font-medium text-white">
+              {analysis.project_type}
+            </span>
+          )}
         </div>
         {project.repo_url && (
           <p className="mt-1 text-sm text-slate-500">
@@ -120,6 +127,15 @@ export default async function ProjectDetailPage({
         </Section>
       )}
 
+      {analysis?.health_score != null && analysis.health_breakdown && (
+        <Section title={`Repository health — ${analysis.health_score}/100`}>
+          <HealthScore
+            overall={analysis.health_score}
+            breakdown={analysis.health_breakdown}
+          />
+        </Section>
+      )}
+
       {analysis?.status === "completed" && (
         <Section title="Detected tech stack">
           <div className="space-y-3 px-4 py-3 text-sm">
@@ -157,6 +173,104 @@ export default async function ProjectDetailPage({
           <p className="whitespace-pre-wrap px-4 py-3 text-sm text-slate-700">
             {analysis.architecture_notes}
           </p>
+        </Section>
+      )}
+
+      {analysis?.sql_schema && (
+        <Section title="Database schema">
+          <div className="px-4 py-3">
+            <table className="w-full text-left text-sm">
+              <thead className="text-xs uppercase tracking-wide text-slate-400">
+                <tr>
+                  <th className="py-1 pr-4">Table</th>
+                  <th className="py-1 pr-4">Columns</th>
+                  <th className="py-1 pr-4">Primary key</th>
+                  <th className="py-1 pr-4">FKs</th>
+                  <th className="py-1 pr-4">Checks</th>
+                  <th className="py-1">File</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-100">
+                {analysis.sql_schema.tables.map((t) => (
+                  <tr key={t.name}>
+                    <td className="py-1.5 pr-4 font-mono text-xs font-medium text-slate-800">
+                      {t.name}
+                    </td>
+                    <td className="py-1.5 pr-4 text-xs text-slate-600">
+                      {t.columns.length}
+                    </td>
+                    <td className="py-1.5 pr-4 font-mono text-xs">
+                      {t.primary_key.length ? (
+                        t.primary_key.join(", ")
+                      ) : (
+                        <span className="font-sans font-medium text-red-600">
+                          none
+                        </span>
+                      )}
+                    </td>
+                    <td className="py-1.5 pr-4 text-xs text-slate-600">
+                      {t.foreign_keys.length}
+                    </td>
+                    <td className="py-1.5 pr-4 text-xs text-slate-600">
+                      {t.checks.length}
+                    </td>
+                    <td className="py-1.5 font-mono text-[11px] text-slate-400">
+                      {t.file}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+            <div className="mt-3 flex flex-wrap gap-2 text-xs text-slate-500">
+              <span>{analysis.sql_schema.views.length} views</span>·
+              <span>{analysis.sql_schema.procedures.length} procedures</span>·
+              <span>{analysis.sql_schema.functions.length} functions</span>·
+              <span>{analysis.sql_schema.triggers.length} triggers</span>·
+              <span>{analysis.sql_schema.indexes.length} indexes</span>
+            </div>
+            {analysis.sql_schema.dropped_views_not_created.length > 0 && (
+              <p className="mt-2 rounded bg-amber-50 px-3 py-2 text-xs text-amber-800">
+                Dropped but never created:{" "}
+                {analysis.sql_schema.dropped_views_not_created.join(", ")}
+              </p>
+            )}
+            {analysis.schema_summary && (
+              <details className="mt-3">
+                <summary className="cursor-pointer text-xs font-medium text-slate-500">
+                  Full schema summary
+                </summary>
+                <pre className="mt-2 max-h-72 overflow-y-auto rounded bg-slate-900 px-3 py-2 text-xs leading-5 text-slate-300">
+                  {analysis.schema_summary}
+                </pre>
+              </details>
+            )}
+          </div>
+        </Section>
+      )}
+
+      {analysis?.repo_map && analysis.repo_map.length > 0 && (
+        <Section title="Repository map">
+          <RepoMapTree nodes={analysis.repo_map} />
+        </Section>
+      )}
+
+      {((analysis?.entry_points?.length ?? 0) > 0 ||
+        (analysis?.api_routes?.length ?? 0) > 0) && (
+        <Section title="Entry points & API routes">
+          <div className="space-y-2 px-4 py-3 text-sm">
+            {analysis?.entry_points?.map((e) => (
+              <code key={e} className="mr-2 rounded bg-slate-100 px-2 py-0.5 text-xs">
+                {e}
+              </code>
+            ))}
+            {(analysis?.api_routes ?? []).map((r, i) => (
+              <p key={i} className="font-mono text-xs text-slate-600">
+                <span className="font-semibold text-slate-800">{r.method}</span>{" "}
+                {r.path}{" "}
+                <span className="text-slate-400">({r.file})</span>
+              </p>
+            ))}
+          </div>
         </Section>
       )}
 
@@ -205,8 +319,19 @@ export default async function ProjectDetailPage({
                     <span className="ml-1 rounded-full bg-slate-100 px-2 py-0.5 text-[10px] text-slate-500">
                       {s.category}
                     </span>
+                    <span className="ml-1 rounded-full bg-indigo-50 px-2 py-0.5 text-[10px] text-indigo-600">
+                      confidence: {s.confidence}
+                    </span>
+                    <span className="ml-1 rounded-full bg-slate-50 px-2 py-0.5 text-[10px] text-slate-500 ring-1 ring-slate-200">
+                      effort: {s.effort}
+                    </span>
                   </p>
                   <p className="mt-0.5 text-xs text-slate-600">{s.description}</p>
+                  {s.reasoning && (
+                    <p className="mt-1 text-[11px] italic leading-4 text-slate-500">
+                      Why: {s.reasoning}
+                    </p>
+                  )}
                   {(s.related_files ?? []).length > 0 && (
                     <p className="mt-1 font-mono text-[11px] text-slate-400">
                       {(s.related_files ?? []).join(", ")}

@@ -72,6 +72,44 @@ export interface Suggestion {
   category: string;
   priority: string;
   related_files: string[] | null;
+  confidence: string;
+  reasoning: string;
+  effort: string;
+}
+
+export interface RepoMapNode {
+  name: string;
+  children?: RepoMapNode[];
+}
+
+export interface SqlTableInfo {
+  name: string;
+  file: string;
+  columns: { name: string; type: string }[];
+  primary_key: string[];
+  foreign_keys: {
+    name: string;
+    columns: string[];
+    ref_table: string;
+    ref_columns: string[];
+  }[];
+  checks: { name: string; expression: string }[];
+  uniques: string[];
+}
+
+export interface SqlSchemaInfo {
+  tables: SqlTableInfo[];
+  views: { name: string; file: string }[];
+  procedures: { name: string; file: string }[];
+  functions: { name: string; file: string }[];
+  triggers: { name: string; file: string }[];
+  indexes: { name: string; table: string; file: string }[];
+  dropped_views_not_created: string[];
+}
+
+export interface HealthPart {
+  score: number;
+  reason: string;
 }
 
 export interface Analysis {
@@ -87,6 +125,14 @@ export interface Analysis {
   test_command: string | null;
   architecture_notes: string | null;
   risk_areas: string | null;
+  project_type: string | null;
+  entry_points: string[] | null;
+  api_routes: { method: string; path: string; file: string }[] | null;
+  repo_map: RepoMapNode[] | null;
+  sql_schema: SqlSchemaInfo | null;
+  schema_summary: string | null;
+  health_score: number | null;
+  health_breakdown: Record<string, HealthPart> | null;
   analysis_logs: string | null;
   error: string | null;
   started_at: string;

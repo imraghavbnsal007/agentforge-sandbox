@@ -21,5 +21,8 @@ class RepoImprovementSuggestion(Base):
     category: Mapped[str] = mapped_column(String(50), default="quality")
     priority: Mapped[str] = mapped_column(String(20), default="medium")
     related_files: Mapped[list | None] = mapped_column(JSON, nullable=True)
+    confidence: Mapped[str] = mapped_column(String(20), default="medium")
+    reasoning: Mapped[str] = mapped_column(Text, default="")
+    effort: Mapped[str] = mapped_column(String(20), default="medium")
 
     analysis: Mapped["ProjectAnalysis"] = relationship(back_populates="suggestions")

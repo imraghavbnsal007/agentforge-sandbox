@@ -166,6 +166,28 @@ repositories:
 Analysis never reads `.env*`, secret/credential/key files, `node_modules`,
 `venv`, `dist`, `build`, or binary files, and caps file sizes and counts.
 
+### Deep intelligence (Phase 4.1)
+
+- **Archives** — `.zip` / `.tar.gz` / `.tgz` files are extracted into a
+  temporary analysis workspace (zip-slip-guarded, size-capped) and analyzed
+  like committed files. Extracted files are never committed and are deleted
+  with the workspace.
+- **Semantic understanding** — project type, entry points, API routes
+  (FastAPI/Django/Spring), React pages/components, and a logical repository
+  map (for SQL: Database → Tables / Views / Procedures / Triggers).
+- **SQL schema analysis** — tables, columns, primary/foreign keys, CHECK
+  constraints, uniques, indexes, views, procedures, triggers, plus a schema
+  summary and grounded findings (tables without PKs, `*id` columns without FK
+  constraints, views dropped but never created). The AI pass compares the
+  schema against README business rules and flags unenforced ones.
+- **Health score** — 0–100 overall with deterministic sub-scores for
+  structure, documentation, testing, maintainability, and security, each with
+  the reason it was assigned.
+- **Grounded suggestions** — every suggestion carries confidence, effort,
+  reasoning, and must cite real files; ungrounded LLM suggestions are dropped.
+  Anything undeterminable is reported as
+  "Unable to determine from repository." rather than guessed.
+
 ## Tests
 
 ```bash
