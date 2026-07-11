@@ -55,25 +55,31 @@ class LLMService:
         error: str | None,
         latency_ms: int,
     ) -> None:
+        # Record the model actually invoked, not necessarily the "provider/model"
+        # form the caller configured — a stray prefix must not silently zero
+        # out cost estimation (pricing tables key on the bare model id).
         cost = None
-        if response is not None:
-            try:
-                provider_cls = get_provider_class(spec.provider)
+        recorded_model = response.model if response is not None else spec.model
+        try:
+            provider_cls = get_provider_class(spec.provider)
+            if response is None:
+                recorded_model = provider_cls.normalize_model_id(spec.model)
+            else:
                 dummy = object.__new__(provider_cls)
                 dummy._api_key = ""
                 cost = provider_cls.estimate_cost(
-                    dummy, spec.model, response.tokens_in, response.tokens_out
+                    dummy, recorded_model, response.tokens_in, response.tokens_out
                 )
-            except LLMProviderError:
-                # Unknown provider: still record the run, cost unknown.
-                cost = None
+        except LLMProviderError:
+            # Unknown provider: still record the run, cost unknown.
+            pass
         self.session.add(
             LLMRun(
                 project_id=self.project_id,
                 agent_run_id=self.agent_run_id,
                 analysis_id=self.analysis_id,
                 provider=spec.provider,
-                model=spec.model,
+                model=recorded_model,
                 phase=phase,
                 tokens_in=response.tokens_in if response else 0,
                 tokens_out=response.tokens_out if response else 0,

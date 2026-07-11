@@ -82,6 +82,43 @@ async def test_get_task_detail_includes_latest_run(
     assert run["test_results"][0]["stderr"] == ""
     assert run["log"] and "workspace ready" in run["log"]
     assert "Files changed" in run["summary"]
+    # Mock runs never call LLMService — no llm_runs rows, so these are null.
+    assert run["llm_provider"] is None
+    assert run["llm_model"] is None
+
+
+async def test_task_detail_reports_actual_provider_and_model_used(
+    client: AsyncClient, session: AsyncSession, task: Task
+) -> None:
+    """The task page must show the provider/model a run actually used (from
+    its llm_runs rows), not the server's global default — this is what
+    surfaced the Gemini model-ID normalization bug in the first place."""
+    from app.models import LLMRun
+
+    run = await RunService(
+        session, runner=MockRunner(delay=0), executor=FakeExecutor()
+    ).execute_agent_run(task.id)
+
+    session.add_all(
+        [
+            LLMRun(
+                agent_run_id=run.id, provider="google", model="gemini-2.5-flash",
+                phase="planning", success=True,
+            ),
+            LLMRun(
+                agent_run_id=run.id, provider="google", model="gemini-2.5-flash",
+                phase="coding", success=True,
+            ),
+        ]
+    )
+    await session.commit()
+
+    body = (await client.get(f"/api/v1/tasks/{task.id}")).json()
+    latest = body["latest_run"]
+    assert latest["llm_provider"] == "google"
+    assert latest["llm_model"] == "gemini-2.5-flash"
+    # Same info is present in the run history list.
+    assert body["runs"][-1]["llm_provider"] == "google"
 
 
 async def test_get_unknown_task_404(client: AsyncClient) -> None:

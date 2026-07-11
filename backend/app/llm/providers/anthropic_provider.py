@@ -83,6 +83,7 @@ class AnthropicProvider(BaseLLMProvider):
         tools: list[dict] | None = None,
         max_tokens: int = 16000,
     ) -> LLMResponse:
+        model = self.normalize_model_id(model)
         kwargs: dict = {
             "model": model,
             "max_tokens": max_tokens,

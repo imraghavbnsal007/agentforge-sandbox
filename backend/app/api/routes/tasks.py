@@ -21,8 +21,12 @@ def _to_read(task: Task) -> TaskRead:
     return item
 
 
-def _to_detail(task: Task) -> TaskDetail:
+async def _to_detail(task: Task, service: TaskService) -> TaskDetail:
     runs = [AgentRunRead.model_validate(r) for r in task.runs]
+    llm_summary = await service.get_run_llm_summary([r.id for r in task.runs])
+    for run_read, run_orm in zip(runs, task.runs):
+        if run_orm.id in llm_summary:
+            run_read.llm_provider, run_read.llm_model = llm_summary[run_orm.id]
     return TaskDetail(
         **_to_read(task).model_dump(),
         latest_run=runs[-1] if runs else None,
@@ -42,7 +46,7 @@ async def create_task(data: TaskCreate, service: Service) -> TaskRead:
 
 @router.get("/{task_id}", response_model=TaskDetail)
 async def get_task(task_id: int, service: Service) -> TaskDetail:
-    return _to_detail(await service.get_task_detail(task_id))
+    return await _to_detail(await service.get_task_detail(task_id), service)
 
 
 @router.post("/{task_id}/retry", response_model=TaskRead)

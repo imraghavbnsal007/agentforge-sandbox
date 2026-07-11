@@ -108,6 +108,31 @@ async def test_api_error_never_exposes_key(monkeypatch):
     assert "sk-ant-supersecret" not in str(excinfo.value)
 
 
+def test_normalize_strips_provider_prefix():
+    assert (
+        AnthropicProvider.normalize_model_id("anthropic/claude-sonnet-5")
+        == "claude-sonnet-5"
+    )
+
+
+def test_normalize_bare_model_unchanged():
+    """Anthropic model handling is unchanged: bare ids pass straight through."""
+    assert AnthropicProvider.normalize_model_id("claude-sonnet-5") == "claude-sonnet-5"
+    assert AnthropicProvider.normalize_model_id("claude-opus-4-8") == "claude-opus-4-8"
+
+
+async def test_chat_sends_normalized_model_to_sdk():
+    client = _fake_client([_api_response(_text_block("ok"), tokens=(10, 5))])
+    provider = AnthropicProvider(client=client)
+    response = await provider.chat(
+        "anthropic/claude-sonnet-5", [text_message("user", "x")]
+    )
+
+    kwargs = client.messages.create.await_args.kwargs
+    assert kwargs["model"] == "claude-sonnet-5"
+    assert response.model == "claude-sonnet-5"
+
+
 def test_requires_credentials(monkeypatch):
     from app.core.config import settings
 

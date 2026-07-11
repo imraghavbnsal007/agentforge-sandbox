@@ -25,6 +25,16 @@ class GeminiProvider(BaseLLMProvider):
 
         return bool(settings.google_api_key or os.environ.get("GOOGLE_API_KEY"))
 
+    @classmethod
+    def normalize_model_id(cls, model: str) -> str:
+        # Strip our own "google/" prefix, then the Developer API's discovery
+        # prefix ("models/gemini-2.5-flash") in case one arrives already
+        # partially normalized — generate_content wants the bare id either way.
+        model = super().normalize_model_id(model)
+        if model.startswith("models/"):
+            model = model[len("models/"):]
+        return model
+
     def __init__(self, client=None) -> None:
         super().__init__(api_key=settings.google_api_key)
         if client is None:
@@ -77,6 +87,33 @@ class GeminiProvider(BaseLLMProvider):
                 contents.append(types.Content(role=role, parts=parts))
         return contents
 
+    async def _describe_available_models(self, limit: int = 8) -> str:
+        """Best-effort model list for a readable 404 message.
+
+        Tries the live API first; falls back to the cached known_models list
+        (per-provider) if the list call itself fails for any reason.
+        """
+        names: list[str] = []
+        try:
+            async for entry in await self.client.aio.models.list(
+                config={"page_size": 50, "query_base": True}
+            ):
+                supported = entry.supported_actions or []
+                if supported and "generateContent" not in supported:
+                    continue
+                name = (entry.name or "").rsplit("/", 1)[-1]
+                if name and name not in names:
+                    names.append(name)
+                if len(names) >= limit:
+                    break
+        except Exception:
+            names = []
+        if not names:
+            names = list(self.known_models)[:limit]
+        if not names:
+            return "Could not retrieve the list of available models."
+        return "Available text-generation models include: " + ", ".join(names)
+
     async def chat(
         self,
         model: str,
@@ -87,6 +124,9 @@ class GeminiProvider(BaseLLMProvider):
     ) -> LLMResponse:
         from google.genai import errors as genai_errors
         from google.genai import types
+
+        original_model = model
+        model = self.normalize_model_id(model)
 
         config_kwargs: dict = {"max_output_tokens": max_tokens}
         if system:
@@ -119,8 +159,14 @@ class GeminiProvider(BaseLLMProvider):
                     f"Google Gemini auth/permission error ({code}) — check GOOGLE_API_KEY"
                 ) from exc
             if code == 404:
+                available = await self._describe_available_models()
+                configured = (
+                    f"{original_model!r} (normalized to {model!r})"
+                    if original_model != model
+                    else repr(model)
+                )
                 raise LLMProviderError(
-                    f"Google Gemini 404 — unknown model {model!r}?"
+                    f"Google Gemini 404 — unknown model {configured}. {available}"
                 ) from exc
             if code == 429:
                 raise LLMProviderError(

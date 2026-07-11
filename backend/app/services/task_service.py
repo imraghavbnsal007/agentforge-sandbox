@@ -3,7 +3,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.enums import TaskStatus
 from app.core.exceptions import ConflictError, NotFoundError
-from app.models import ProjectAnalysis, Task
+from app.models import LLMRun, ProjectAnalysis, Task
 from app.repositories.project_repo import ProjectRepository
 from app.repositories.task_repo import TaskRepository
 from app.schemas.task import TaskCreate
@@ -73,6 +73,32 @@ class TaskService:
         if task is None:
             raise NotFoundError(f"Task {task_id} not found")
         return task
+
+    async def get_run_llm_summary(self, run_ids: list[int]) -> dict[int, tuple[str, str]]:
+        """The provider/model each run actually used, from its llm_runs rows —
+        not the global default. Prefers the coding phase (the bulk of a run),
+        falling back to whichever phase has a record. Empty for mock runs."""
+        if not run_ids:
+            return {}
+        rows = (
+            await self.session.execute(
+                select(LLMRun.agent_run_id, LLMRun.provider, LLMRun.model, LLMRun.phase)
+                .where(LLMRun.agent_run_id.in_(run_ids))
+                .order_by(LLMRun.id)
+            )
+        ).all()
+        by_run: dict[int, dict[str, tuple[str, str]]] = {}
+        for run_id, provider, model, phase in rows:
+            by_run.setdefault(run_id, {}).setdefault(phase, (provider, model))
+        summary: dict[int, tuple[str, str]] = {}
+        for run_id, phases in by_run.items():
+            for preferred in ("coding", "planning", "analysis", "summarize", "review"):
+                if preferred in phases:
+                    summary[run_id] = phases[preferred]
+                    break
+            else:
+                summary[run_id] = next(iter(phases.values()))
+        return summary
 
     async def retry_task(self, task_id: int) -> Task:
         """Re-enqueue an agent run for an existing task (a new AgentRun is created)."""

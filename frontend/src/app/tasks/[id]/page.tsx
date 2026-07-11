@@ -63,7 +63,12 @@ export default async function TaskDetailPage({
           {run && (
             <ModeBadge
               mode={run.mode}
-              model={run.mode === "llm" ? config.anthropic_model : undefined}
+              provider={run.llm_provider ?? undefined}
+              model={
+                run.mode === "llm"
+                  ? (run.llm_model ?? config.anthropic_model)
+                  : undefined
+              }
             />
           )}
           {finished && <RetryButton taskId={task.id} />}
@@ -253,7 +258,11 @@ export default async function TaskDetailPage({
               <div key={r.id}>
                 <div className="flex flex-wrap items-center gap-2 bg-slate-100 px-4 py-2 text-xs text-slate-600">
                   <span className="font-medium">Run #{r.id}</span>
-                  <ModeBadge mode={r.mode} />
+                  <ModeBadge
+                    mode={r.mode}
+                    provider={r.llm_provider ?? undefined}
+                    model={r.llm_model ?? undefined}
+                  />
                   <span
                     className={
                       r.status === "failed"

@@ -44,6 +44,10 @@ class AgentRunRead(BaseModel):
     branch_name: str | None
     commit_sha: str | None
     pr_url: str | None
+    # Actual provider/model this run used, from its llm_runs rows (not the
+    # global default) — populated by the tasks route, absent for mock runs.
+    llm_provider: str | None = None
+    llm_model: str | None = None
     started_at: datetime
     finished_at: datetime | None
     file_changes: list[FileChangeRead]

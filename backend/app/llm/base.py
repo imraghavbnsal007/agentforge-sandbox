@@ -55,6 +55,23 @@ class BaseLLMProvider(ABC):
     def __init__(self, api_key: str = "") -> None:
         self._api_key = api_key
 
+    # -- Model ID normalization ---------------------------------------------
+    #
+    # Canonical internal model IDs are "provider/model" (e.g.
+    # "google/gemini-2.5-flash"), matching how ModelSpec/LLMRun/the UI
+    # display them. Providers must accept a bare model id too — callers
+    # (env vars, DB rows written via raw API calls, profile overrides) are
+    # not guaranteed to strip the prefix before it reaches here. Each
+    # provider normalizes independently; the default strips its own
+    # "<name>/" prefix if present and leaves anything else untouched.
+
+    @classmethod
+    def normalize_model_id(cls, model: str) -> str:
+        prefix = f"{cls.name}/"
+        if model.startswith(prefix):
+            return model[len(prefix):]
+        return model
+
     # -- Required per provider -------------------------------------------
 
     @classmethod

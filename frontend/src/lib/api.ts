@@ -231,6 +231,10 @@ export interface AgentRun {
   branch_name: string | null;
   commit_sha: string | null;
   pr_url: string | null;
+  // The provider/model this run actually used (from its llm_runs rows) —
+  // not the global default. Null for mock runs or runs with no recorded calls.
+  llm_provider: string | null;
+  llm_model: string | null;
   started_at: string;
   finished_at: string | null;
   file_changes: FileChange[];

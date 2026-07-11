@@ -71,6 +71,30 @@ async def test_analyze_repository_bad_json_raises():
         await provider.analyze_repository("fake-model", "prompt")
 
 
+def test_default_normalize_model_id_strips_own_prefix():
+    """Future providers get correct normalization for free unless they
+    override it — the default strips '<name>/' using cls.name."""
+
+    class SamplePlaceholderProvider(FakeProvider):
+        name = "sampleprovider"
+        label = "Sample Placeholder"
+
+    assert (
+        SamplePlaceholderProvider.normalize_model_id("sampleprovider/some-model")
+        == "some-model"
+    )
+    assert SamplePlaceholderProvider.normalize_model_id("some-model") == "some-model"
+    # A different provider's prefix is left alone.
+    assert (
+        SamplePlaceholderProvider.normalize_model_id("google/gemini-2.5-flash")
+        == "google/gemini-2.5-flash"
+    )
+
+    from app.llm import base
+
+    del base._REGISTRY["sampleprovider"]
+
+
 def test_scrub_removes_api_key():
     provider = FakeProvider()
     provider._api_key = "sk-secret-123"

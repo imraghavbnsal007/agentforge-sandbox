@@ -117,3 +117,90 @@ def test_cost_estimation():
     cost = GeminiProvider.estimate_cost(provider, "gemini-2.5-flash", 1_000_000, 100_000)
     assert cost == round(0.30 + 0.25, 6)
     assert GeminiProvider.estimate_cost(provider, "gemini-9-unknown", 1000, 1000) is None
+
+
+# -- Model ID normalization (bug: "google/gemini-2.5-flash" reached the SDK
+# unstripped and 404'd, even though the bare model is valid) ----------------
+
+def test_normalize_strips_provider_prefix():
+    assert GeminiProvider.normalize_model_id("google/gemini-2.5-flash") == "gemini-2.5-flash"
+
+
+def test_normalize_bare_model_unchanged():
+    assert GeminiProvider.normalize_model_id("gemini-2.5-flash") == "gemini-2.5-flash"
+
+
+def test_normalize_strips_models_discovery_prefix():
+    # google/ prefix stripped first, then models/ (order matters if both appear).
+    assert GeminiProvider.normalize_model_id("models/gemini-2.5-flash") == "gemini-2.5-flash"
+    assert (
+        GeminiProvider.normalize_model_id("google/models/gemini-2.5-flash")
+        == "gemini-2.5-flash"
+    )
+
+
+async def test_chat_sends_normalized_model_to_sdk():
+    client = _fake_client([_api_response(text="ok")])
+    provider = GeminiProvider(client=client)
+    response = await provider.chat("google/gemini-2.5-flash", [text_message("user", "x")])
+
+    kwargs = client.aio.models.generate_content.await_args.kwargs
+    assert kwargs["model"] == "gemini-2.5-flash"
+    # The recorded response also reflects what was actually invoked.
+    assert response.model == "gemini-2.5-flash"
+
+
+def _api_error_404(message: str):
+    from google.genai import errors
+
+    return errors.APIError(404, {"error": {"message": message, "status": "NOT_FOUND"}})
+
+
+def _models_list_pager(names: list[str]):
+    """An async-iterable standing in for AsyncPager[Model]."""
+
+    class _Pager:
+        def __aiter__(self):
+            async def gen():
+                for name in names:
+                    yield SimpleNamespace(
+                        name=f"models/{name}", supported_actions=["generateContent"]
+                    )
+            return gen()
+
+    async def list_models(config=None):
+        return _Pager()
+
+    return list_models
+
+
+async def test_invalid_model_produces_readable_error_with_available_models():
+    client = _fake_client([_api_error_404("model not found")])
+    client.aio.models.list = _models_list_pager(["gemini-2.5-flash", "gemini-2.5-pro"])
+    provider = GeminiProvider(client=client)
+
+    with pytest.raises(LLMProviderError) as excinfo:
+        await provider.chat("google/gemini-9-nonexistent", [text_message("user", "x")])
+
+    message = str(excinfo.value)
+    assert "gemini-9-nonexistent" in message
+    assert "normalized to 'gemini-9-nonexistent'" in message
+    assert "gemini-2.5-flash" in message
+    assert "gemini-2.5-pro" in message
+
+
+async def test_invalid_model_error_falls_back_to_known_models_if_list_fails():
+    client = _fake_client([_api_error_404("model not found")])
+
+    async def broken_list(config=None):
+        raise RuntimeError("network down")
+
+    client.aio.models.list = broken_list
+    provider = GeminiProvider(client=client)
+
+    with pytest.raises(LLMProviderError) as excinfo:
+        await provider.chat("bogus-model", [text_message("user", "x")])
+
+    message = str(excinfo.value)
+    # Falls back to the provider's own known_models list.
+    assert "gemini-2.5-flash" in message
