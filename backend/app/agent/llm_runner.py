@@ -148,7 +148,12 @@ class LLMRunner:
                         "input": call.input,
                     }
                 )
-            messages.append({"role": "assistant", "content": assistant_blocks})
+            assistant_message: dict = {"role": "assistant", "content": assistant_blocks}
+            if response.raw is not None:
+                # Lets the provider replay its own turn verbatim (required by
+                # Gemini thinking models' thought signatures).
+                assistant_message["raw"] = response.raw
+            messages.append(assistant_message)
 
             result_blocks = []
             for call in response.tool_calls:

@@ -82,6 +82,22 @@ async def test_apply_changes_tool_loop(session: AsyncSession, workspace: Workspa
     assert [r.phase for r in runs] == ["coding", "coding", "coding"]
 
 
+async def test_runner_carries_raw_model_turn_for_replay(
+    session: AsyncSession, workspace: Workspace
+):
+    """The assistant message must carry the provider's raw turn so providers
+    that need verbatim replay (Gemini thought signatures) can use it."""
+    first = tool_response(("list_files", {}))
+    first.raw = {"sentinel": "raw-model-turn"}
+    runner, provider = make_runner(session, [first, text_response("done")])
+    await runner.apply_changes("T", "R", ["s"], workspace, lambda _m: None)
+
+    second_call_messages = provider.calls[1]["messages"]
+    assistant = second_call_messages[1]
+    assert assistant["role"] == "assistant"
+    assert assistant["raw"] == {"sentinel": "raw-model-turn"}
+
+
 async def test_tool_error_reported_to_model(session: AsyncSession, workspace: Workspace):
     runner, provider = make_runner(
         session,

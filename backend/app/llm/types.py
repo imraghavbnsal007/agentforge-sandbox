@@ -31,6 +31,10 @@ class LLMResponse:
     model: str = ""
     provider: str = ""
     latency_ms: int = 0
+    # Provider-opaque copy of the model turn, replayed verbatim on the next
+    # request when present. Some APIs require this: Gemini thinking models
+    # reject reconstructed function-call parts that lack thought_signature.
+    raw: object | None = None
 
 
 # Neutral message format:

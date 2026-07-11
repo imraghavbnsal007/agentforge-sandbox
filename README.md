@@ -98,9 +98,10 @@ ANTHROPIC_API_KEY=  GOOGLE_API_KEY=  OPENAI_API_KEY=  OPENROUTER_API_KEY=  OLLAM
 ```
 
 **Execution profiles** map pipeline phases to provider/model (env-overridable):
-*Cheap* (everything on Gemini Flash), *Balanced* (analysis on Flash;
-planning/coding/review on Claude Sonnet), *Premium* (everything on Claude
-Opus). The New Task page shows each profile's estimated cost and latency
+*Cheap* (everything on Gemini 3.5 Flash), *Balanced* (analysis on Gemini 3.5
+Flash; planning/coding/review on Claude Sonnet), *Premium* (everything on
+Claude Opus). Note: Gemini 2.5 Flash is unavailable for new users — use
+Gemini 3.5 Flash; historical runs on 2.5 Flash still display correctly. The New Task page shows each profile's estimated cost and latency
 before execution, plus a Custom mode with explicit provider + model selects.
 Projects remember preferred provider/model/profile (Project page → AI
 settings); new tasks default to them. Precedence: task override → task

@@ -14,8 +14,8 @@ from app.llm.profiles import (
 def test_builtin_profiles_match_spec():
     profiles = get_profiles()
     assert set(profiles) == {"cheap", "balanced", "premium"}
-    assert profiles["cheap"]["planning"] == ModelSpec("google", "gemini-2.5-flash")
-    assert profiles["balanced"]["analysis"] == ModelSpec("google", "gemini-2.5-flash")
+    assert profiles["cheap"]["planning"] == ModelSpec("google", "gemini-3.5-flash")
+    assert profiles["balanced"]["analysis"] == ModelSpec("google", "gemini-3.5-flash")
     assert profiles["balanced"]["coding"] == ModelSpec("anthropic", "claude-sonnet-5")
     assert profiles["premium"]["coding"] == ModelSpec("anthropic", "claude-opus-4-8")
     for profile in profiles.values():
@@ -44,7 +44,7 @@ def test_resolution_precedence(monkeypatch: pytest.MonkeyPatch):
 
     # 4. Project profile.
     specs = resolve_specs(None, None, None, None, None, "cheap")
-    assert specs["coding"] == ModelSpec("google", "gemini-2.5-flash")
+    assert specs["coding"] == ModelSpec("google", "gemini-3.5-flash")
 
     # 5. Global LLM_PROVIDER + DEFAULT_MODEL — provider switching without code.
     monkeypatch.setattr(settings, "llm_provider", "google")
