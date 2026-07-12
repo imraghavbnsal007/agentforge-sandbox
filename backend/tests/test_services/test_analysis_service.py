@@ -31,25 +31,28 @@ class FakeAnalyst:
         self.context: dict | None = None
 
     async def enrich(self, root: Path, facts, context: dict | None = None) -> dict:
+        from app.llm.analysis_schema import validate_enrichment
+
         self.context = context
-        return {
+        raw = {
             "summary": "A tiny calculator project.",
             "architecture_notes": "Flat module layout.",
             "risk_areas": "string_utils has no edge-case tests.",
-            "files": [
-                {"path": "calculator.py", "file_type": "core",
-                 "purpose": "Arithmetic functions", "importance": 95},
-                {"path": "hallucinated.py", "file_type": "core",
-                 "purpose": "does not exist", "importance": 99},
+            "file_purposes": [
+                {"file_path": "calculator.py",
+                 "purpose": "Arithmetic functions", "importance_score": 95},
+                {"file_path": "hallucinated.py",
+                 "purpose": "does not exist", "importance_score": 99},
             ],
             "suggestions": [
                 {"title": "Add edge-case tests", "description": "Cover zero and negatives.",
                  "category": "testing", "priority": "high", "confidence": "high",
-                 "effort": "small", "reasoning": "test_calculator.py only covers happy paths.",
+                 "estimated_effort": "small",
+                 "reasoning": "test_calculator.py only covers happy paths.",
                  "related_files": ["tests/test_calculator.py", "fake.py"]},
                 {"title": "Weird fields get normalized", "description": "x",
                  "category": "nonsense", "priority": "urgent", "confidence": "certain",
-                 "effort": "huge", "related_files": ["calculator.py"]},
+                 "estimated_effort": "huge", "related_files": ["calculator.py"]},
                 {"title": "Ungrounded suggestion", "description": "no files cited",
                  "category": "quality", "priority": "low", "related_files": []},
                 {"title": "Hallucinated files only", "description": "cites nothing real",
@@ -57,6 +60,30 @@ class FakeAnalyst:
                  "related_files": ["does_not_exist.py"]},
             ],
         }
+        # Mirror the real contract: the provider layer returns a
+        # schema-validated dump, never a raw model response.
+        return validate_enrichment(raw).model_dump()
+
+
+class ParseFailingAnalyst:
+    """Simulates the provider raising AnalysisParseError with diagnostics."""
+
+    async def enrich(self, root: Path, facts, context: dict | None = None) -> dict:
+        from app.llm.json_extract import JSONExtractionError, ParseDiagnostics
+        from app.llm.types import AnalysisParseError
+
+        exc = JSONExtractionError("balanced_scan", "no parseable JSON")
+        raise AnalysisParseError(
+            "Google Gemini returned unparseable analysis JSON",
+            diagnostics=ParseDiagnostics.from_failure(
+                provider="google",
+                model="gemini-3.5-flash",
+                response_text="I could not produce JSON, sorry",
+                exc=exc,
+                mime_type="application/json",
+                finish_reason="MAX_TOKENS",
+            ),
+        )
 
 
 async def _make_analysis(session: AsyncSession) -> int:
@@ -124,6 +151,56 @@ async def test_analysis_happy_path(
 
     found = await latest_completed_analysis(session, result.project_id)
     assert found is not None and found.id == analysis_id
+
+
+async def test_enrichment_parse_failure_degrades_gracefully(
+    session: AsyncSession, monkeypatch: pytest.MonkeyPatch
+):
+    """A parse failure must not sink the deterministic analysis."""
+    monkeypatch.setattr(settings, "github_token", "tok")
+    analysis_id = await _make_analysis(session)
+    service = AnalysisService(
+        session,
+        git=FakeGit(Path(settings.sample_repo_path)),
+        analyst=ParseFailingAnalyst(),
+    )
+    result = await service.run_analysis(analysis_id)
+
+    # The analysis completes with a warning instead of failing.
+    assert result.status == AnalysisStatus.completed
+    assert result.error is None
+    assert result.enrichment_warning is not None
+    assert "could not be parsed" in result.enrichment_warning
+    # Deterministic facts are all preserved.
+    assert result.languages == ["Python"]
+    assert result.test_command == "python -m pytest -q"
+    assert result.project_type == "Python project"
+    assert result.health_score is not None
+    assert result.repo_map
+    assert result.summary  # README fallback
+    # Sanitized diagnostics land in the logs — with the finish reason.
+    assert "enrichment parse diagnostics" in result.analysis_logs
+    assert "finish_reason=MAX_TOKENS" in result.analysis_logs
+    assert "failed_stage=balanced_scan" in result.analysis_logs
+    assert "Re-analyze Repository" in result.analysis_logs
+    # It still counts as a completed analysis.
+    found = await latest_completed_analysis(session, result.project_id)
+    assert found is not None and found.id == analysis_id
+
+
+async def test_successful_enrichment_leaves_no_warning(
+    session: AsyncSession, monkeypatch: pytest.MonkeyPatch
+):
+    monkeypatch.setattr(settings, "github_token", "tok")
+    analysis_id = await _make_analysis(session)
+    service = AnalysisService(
+        session,
+        git=FakeGit(Path(settings.sample_repo_path)),
+        analyst=FakeAnalyst(),
+    )
+    result = await service.run_analysis(analysis_id)
+    assert result.status == AnalysisStatus.completed
+    assert result.enrichment_warning is None
 
 
 async def test_analysis_without_analyst_uses_heuristics(

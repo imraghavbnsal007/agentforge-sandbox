@@ -26,6 +26,7 @@ class FakeProvider(BaseLLMProvider):
         system: str | None = None,
         tools: list[dict] | None = None,
         max_tokens: int = 16000,
+        json_schema: dict | None = None,
     ) -> LLMResponse:
         import copy
 
@@ -36,6 +37,7 @@ class FakeProvider(BaseLLMProvider):
                 "messages": copy.deepcopy(messages),
                 "system": system,
                 "tools": tools,
+                "json_schema": json_schema,
             }
         )
         if not self.responses:

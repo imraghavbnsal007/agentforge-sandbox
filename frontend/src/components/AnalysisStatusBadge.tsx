@@ -9,13 +9,25 @@ const STYLES: Record<AnalysisStatus, string> = {
 
 export function AnalysisStatusBadge({
   status,
+  warning = false,
 }: {
   status: AnalysisStatus | null;
+  warning?: boolean;
 }) {
   if (!status) {
     return (
       <span className="inline-flex items-center rounded-full bg-slate-100 px-2.5 py-0.5 text-xs font-medium text-slate-400">
         not analyzed
+      </span>
+    );
+  }
+  if (status === "completed" && warning) {
+    return (
+      <span
+        className="inline-flex items-center gap-1.5 rounded-full bg-amber-100 px-2.5 py-0.5 text-xs font-medium text-amber-800"
+        title="Repository facts were analyzed successfully, but AI enrichment could not be parsed."
+      >
+        analyzed (partial)
       </span>
     );
   }

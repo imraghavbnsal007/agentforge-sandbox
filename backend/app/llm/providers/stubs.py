@@ -30,6 +30,7 @@ class _NotImplementedProvider(BaseLLMProvider):
         system: str | None = None,
         tools: list[dict] | None = None,
         max_tokens: int = 16000,
+        json_schema: dict | None = None,
     ) -> LLMResponse:  # pragma: no cover - constructor always raises
         raise LLMProviderError(f"{self.label} provider is not implemented yet")
 

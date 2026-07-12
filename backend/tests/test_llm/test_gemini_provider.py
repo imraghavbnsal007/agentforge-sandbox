@@ -344,3 +344,63 @@ async def test_404_on_other_models_has_no_migration_hint():
         await provider.chat("gemini-9-bogus", [text_message("user", "x")])
 
     assert "unavailable for new users" not in str(excinfo.value)
+
+
+# -- Structured output (repository analysis) --------------------------------
+
+
+async def test_json_schema_sets_structured_output_config():
+    client = _fake_client([_api_response(text='{"summary": "s"}')])
+    provider = GeminiProvider(client=client)
+    schema = {"type": "object", "properties": {"summary": {"type": "string"}}}
+    await provider.chat(
+        "gemini-3.5-flash", [text_message("user", "analyze")], json_schema=schema
+    )
+    config = client.aio.models.generate_content.await_args.kwargs["config"]
+    assert config.response_mime_type == "application/json"
+    assert config.response_json_schema == schema
+
+
+async def test_no_json_schema_leaves_coding_calls_unchanged():
+    client = _fake_client([_api_response(text="ok")])
+    provider = GeminiProvider(client=client)
+    response = await provider.chat("gemini-3.5-flash", [text_message("user", "code")])
+    config = client.aio.models.generate_content.await_args.kwargs["config"]
+    assert config.response_mime_type is None
+    assert config.response_json_schema is None
+    assert response.parsed is None
+    assert response.mime_type == ""
+
+
+async def test_parsed_dict_surfaces_on_response():
+    api_response = _api_response(text='{"summary": "s"}')
+    api_response.parsed = {"summary": "s"}
+    client = _fake_client([api_response])
+    provider = GeminiProvider(client=client)
+    response = await provider.chat(
+        "gemini-3.5-flash", [text_message("user", "x")], json_schema={"type": "object"}
+    )
+    assert response.parsed == {"summary": "s"}
+    assert response.mime_type == "application/json"
+
+
+async def test_non_dict_parsed_is_dropped():
+    api_response = _api_response(text='[{"summary": "s"}]')
+    api_response.parsed = [{"summary": "s"}]  # SDK can hand back lists/models
+    client = _fake_client([api_response])
+    provider = GeminiProvider(client=client)
+    response = await provider.chat(
+        "gemini-3.5-flash", [text_message("user", "x")], json_schema={"type": "object"}
+    )
+    assert response.parsed is None
+
+
+async def test_finish_reason_is_captured_verbatim():
+    api_response = _api_response(text="truncated json...")
+    api_response.candidates = [
+        SimpleNamespace(content=None, finish_reason=SimpleNamespace(name="MAX_TOKENS"))
+    ]
+    client = _fake_client([api_response])
+    provider = GeminiProvider(client=client)
+    response = await provider.chat("gemini-3.5-flash", [text_message("user", "x")])
+    assert response.finish_reason == "MAX_TOKENS"

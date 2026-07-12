@@ -1,9 +1,7 @@
 """Repository analysis job: clone -> heuristic facts -> optional Claude enrichment."""
 
 import asyncio
-import json
 import logging
-import re
 import shutil
 import tempfile
 from datetime import datetime, timezone
@@ -15,6 +13,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.config import settings
 from app.core.enums import AgentMode, AnalysisStatus
 from app.core.exceptions import NotFoundError
+from app.llm.types import AnalysisParseError, LLMProviderError
 from app.models import (
     Project,
     ProjectAnalysis,
@@ -42,12 +41,12 @@ from app.services.sql_analyzer import (
 
 logger = logging.getLogger(__name__)
 
-VALID_CATEGORIES = {"testing", "docs", "structure", "security", "quality"}
-VALID_PRIORITIES = {"high", "medium", "low"}
-VALID_CONFIDENCE = {"high", "medium", "low"}
-VALID_EFFORT = {"small", "medium", "large"}
 MAX_EXCERPT_FILES = 12
 MAX_EXCERPT_CHARS = 3000
+
+ENRICHMENT_WARNING_PREFIX = (
+    "Repository facts were analyzed successfully, but AI enrichment "
+)
 
 ENRICH_PROMPT = """You are analyzing a software repository to build an engineering brief.
 
@@ -91,17 +90,17 @@ lookup table, a derived value with no trigger/procedure).
 Respond with ONLY a JSON object (no markdown fences) with exactly these keys:
 - "summary": 2-4 sentences: what this project is and its purpose.
 - "architecture_notes": 2-5 sentences on how the pieces are organized and interact.
-- "risk_areas": 1-4 sentences on weak spots, grounded in specific files/tables.
-- "files": array of the 5-15 most important files, each
-  {{"path": str, "file_type": one of "entrypoint"|"config"|"core"|"docs"|"tests"|"infra"|"ci",
-    "purpose": one sentence, "importance": integer 0-100}}.
+- "risk_areas": array of 1-4 short strings, each one weak spot grounded in
+  specific files/tables.
+- "file_purposes": array of the 5-15 most important files, each
+  {{"file_path": str, "purpose": one sentence, "importance_score": integer 0-100}}.
 - "suggestions": array of 3-8 concrete improvements, each
   {{"title": short imperative phrase naming the file/table concerned,
     "description": 1-3 sentences describing exactly what is missing or wrong,
     "category": one of "testing"|"docs"|"structure"|"security"|"quality",
     "priority": "high"|"medium"|"low",
     "confidence": "high"|"medium"|"low" — how certain you are given the evidence,
-    "effort": "small"|"medium"|"large",
+    "estimated_effort": "small"|"medium"|"large",
     "reasoning": one or two sentences citing the evidence (file, statement, README rule),
     "related_files": non-empty array of paths from the file list}}.
 Only reference paths that appear in the file list."""
@@ -339,13 +338,40 @@ class AnalysisService:
                     "schema_summary": analysis.schema_summary,
                     "findings": "\n".join(f"- {f['title']}" for f in findings),
                 }
-                data = await analyst.enrich(clone_dir, facts, context)
-                dropped = self._apply_enrichment(analysis, data, set(facts.files))
-                log(
-                    f"enrichment done: {len(analysis.file_summaries)} file summaries, "
-                    f"{len(analysis.suggestions)} suggestions"
-                    + (f" ({dropped} ungrounded suggestion(s) dropped)" if dropped else "")
-                )
+                try:
+                    data = await analyst.enrich(clone_dir, facts, context)
+                except LLMProviderError as exc:
+                    # Deterministic results are already computed and
+                    # committed — enrichment failure must not sink them.
+                    verb = (
+                        "could not be parsed"
+                        if isinstance(exc, AnalysisParseError)
+                        else "failed"
+                    )
+                    analysis.enrichment_warning = (
+                        f"{ENRICHMENT_WARNING_PREFIX}{verb}: {exc}"[:2000]
+                    )
+                    diagnostics = getattr(exc, "diagnostics", None)
+                    if diagnostics is not None:
+                        log(diagnostics.render())
+                    log(
+                        "AI enrichment failed — deterministic results "
+                        "preserved. Use Re-analyze Repository to retry."
+                    )
+                    analysis.summary = analysis.summary or (
+                        facts.readme.split("\n\n")[0][:500]
+                        or f"{project.name}: no README found."
+                    )
+                else:
+                    dropped = self._apply_enrichment(
+                        analysis, data, set(facts.files),
+                        {p: t for p, t, *_ in facts.important_files},
+                    )
+                    log(
+                        f"enrichment done: {len(analysis.file_summaries)} file summaries, "
+                        f"{len(analysis.suggestions)} suggestions"
+                        + (f" ({dropped} ungrounded suggestion(s) dropped)" if dropped else "")
+                    )
             else:
                 analysis.summary = (
                     facts.readme.split("\n\n")[0][:500]
@@ -374,37 +400,46 @@ class AnalysisService:
         return analysis
 
     def _apply_enrichment(
-        self, analysis: ProjectAnalysis, data: dict, known_files: set[str]
+        self,
+        analysis: ProjectAnalysis,
+        data: dict,
+        known_files: set[str],
+        file_types: dict[str, str] | None = None,
     ) -> int:
-        """Apply validated enrichment; returns the number of dropped suggestions."""
+        """Apply schema-validated enrichment; returns dropped-suggestion count.
+
+        `data` is an EnrichmentResult dump — types and enum values are
+        already normalized. Grounding (paths must exist in the repo) is
+        still enforced here because the schema cannot know the file list.
+        """
+        file_types = file_types or {}
         analysis.summary = str(data.get("summary") or "")[:2000] or analysis.summary
         analysis.architecture_notes = str(data.get("architecture_notes") or "")[:4000]
-        analysis.risk_areas = str(data.get("risk_areas") or "")[:4000]
+        analysis.risk_areas = "\n".join(
+            str(r) for r in (data.get("risk_areas") or [])
+        )[:4000]
 
         enriched = {}
-        for item in data.get("files") or []:
-            if not isinstance(item, dict):
-                continue
-            path = str(item.get("path") or "")
-            if path not in known_files:
-                continue
-            enriched[path] = item
+        for item in data.get("file_purposes") or []:
+            path = item["file_path"]
+            if path in known_files:
+                enriched[path] = item
         if enriched:
             analysis.file_summaries.clear()
             for path, item in enriched.items():
                 analysis.file_summaries.append(
                     RepoFileSummary(
                         file_path=path,
-                        file_type=str(item.get("file_type") or "")[:50],
+                        file_type=file_types.get(path, "")[:50],
                         purpose=str(item.get("purpose") or "")[:1000],
-                        importance_score=max(0, min(100, int(item.get("importance") or 0))),
+                        importance_score=item.get("importance_score", 50),
                     )
                 )
 
         dropped = 0
         existing_titles = {s.title.lower() for s in analysis.suggestions}
         for item in data.get("suggestions") or []:
-            if not isinstance(item, dict) or not item.get("title"):
+            if not item.get("title"):
                 dropped += 1
                 continue
             related = [
@@ -417,18 +452,14 @@ class AnalysisService:
             title = str(item["title"])[:300]
             if title.lower() in existing_titles:
                 continue  # deterministic finding already covers it
-            category = str(item.get("category") or "quality").lower()
-            priority = str(item.get("priority") or "medium").lower()
-            confidence = str(item.get("confidence") or "medium").lower()
-            effort = str(item.get("effort") or "medium").lower()
             analysis.suggestions.append(
                 RepoImprovementSuggestion(
                     title=title,
                     description=str(item.get("description") or "")[:2000],
-                    category=category if category in VALID_CATEGORIES else "quality",
-                    priority=priority if priority in VALID_PRIORITIES else "medium",
-                    confidence=confidence if confidence in VALID_CONFIDENCE else "medium",
-                    effort=effort if effort in VALID_EFFORT else "medium",
+                    category=item.get("category", "quality"),
+                    priority=item.get("priority", "medium"),
+                    confidence=item.get("confidence", "medium"),
+                    effort=item.get("estimated_effort", "medium"),
                     reasoning=str(item.get("reasoning") or "")[:2000],
                     related_files=related,
                 )

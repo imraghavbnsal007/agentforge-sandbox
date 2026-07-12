@@ -54,6 +54,7 @@ class AnalysisRead(BaseModel):
     health_breakdown: dict | None
     analysis_logs: str | None
     error: str | None
+    enrichment_warning: str | None = None
     started_at: datetime
     finished_at: datetime | None
     file_summaries: list[FileSummaryRead]

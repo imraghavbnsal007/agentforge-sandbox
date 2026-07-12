@@ -240,6 +240,35 @@ reload reliable across the Docker bind mount (file edits show up in ~2s).
   automatically (`ChunkGuard`), rate-limited so a broken build can't
   reload-loop.
 
+## Database Safety
+
+All data lives in the `pgdata` Docker volume. `make down` and `make restart`
+**never** touch it. The destructive command `docker compose down -v` exists in
+exactly one place — `scripts/reset_db.sh` — behind a typed confirmation phrase.
+
+```bash
+make backup                        # backups/agentforge-YYYYMMDD-HHMMSS.sql
+make list-backups                  # newest first
+make restore FILE=backups/xxx.sql  # validate → safety backup → clean restore → migrations
+make reset-db                      # DELETES the volume; requires typing the phrase
+                                   # "DELETE ALL AGENTFORGE DATA"; auto-backup first
+```
+
+Rules enforced by the scripts (and by `tests/test_ops_safety.py`):
+
+- Backups are written to a temp file, size- and header-validated, then
+  atomically renamed. An existing file is never overwritten.
+- `make restore` refuses non-pg_dump files, takes an automatic pre-restore
+  safety backup (`auto-agentforge-*.sql`), stops backend/worker during the
+  restore, and runs `alembic upgrade head` afterwards.
+- `make reset-db` and `make restore` always create automatic safety backups
+  first. Retention keeps the newest 10 `auto-*` backups; manually created
+  backups are never deleted.
+- `backups/*.sql` is git-ignored; the directory is mounted read-only into the
+  backend, and `GET /health` reports backup count and freshness.
+- The scripts honor `COMPOSE_PROJECT_NAME`, so an isolated test stack (e.g.
+  `agentforge_bktest`) backs up / resets only its own database.
+
 ## Tests
 
 ```bash

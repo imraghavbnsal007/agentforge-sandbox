@@ -7,11 +7,25 @@ prompts stay identical across providers and a new provider is exactly one
 class: subclassing auto-registers it.
 """
 
-import json
-import re
 from abc import ABC, abstractmethod
 
-from app.llm.types import LLMProviderError, LLMResponse, Message, text_message
+from app.llm.analysis_schema import (
+    ENRICHMENT_JSON_SCHEMA,
+    SchemaValidationError,
+    validate_enrichment,
+)
+from app.llm.json_extract import (
+    JSONExtractionError,
+    ParseDiagnostics,
+    extract_json_object,
+)
+from app.llm.types import (
+    AnalysisParseError,
+    LLMProviderError,
+    LLMResponse,
+    Message,
+    text_message,
+)
 
 SYSTEM_PROMPT = (
     "You are AgentForge, an expert software engineer. You implement feature "
@@ -87,8 +101,15 @@ class BaseLLMProvider(ABC):
         system: str | None = None,
         tools: list[dict] | None = None,
         max_tokens: int = 16000,
+        json_schema: dict | None = None,
     ) -> LLMResponse:
-        """One model call in the neutral message format."""
+        """One model call in the neutral message format.
+
+        `json_schema` asks for structured JSON output. Providers that
+        support it (Gemini) enforce it server-side and fill
+        LLMResponse.parsed; providers that don't simply ignore it — callers
+        must still parse `text` defensively.
+        """
 
     # -- Shared behavior ---------------------------------------------------
 
@@ -178,17 +199,35 @@ class BaseLLMProvider(ABC):
     async def analyze_repository(
         self, model: str, prompt: str
     ) -> tuple[dict, LLMResponse]:
-        """Repository-analysis call that must return a JSON object."""
+        """Repository-analysis call that must return a JSON object.
+
+        Requests structured output where the provider supports it, runs the
+        provider-independent extraction pipeline (provider_parsed → direct →
+        fenced → balanced_scan), then validates against the enrichment
+        schema. Returns the normalized enrichment dict. On failure raises
+        AnalysisParseError carrying sanitized ParseDiagnostics.
+        """
         response = await self.chat(
-            model, [text_message("user", prompt)], max_tokens=4096
+            model,
+            [text_message("user", prompt)],
+            max_tokens=16000,
+            json_schema=ENRICHMENT_JSON_SCHEMA,
         )
-        text = re.sub(r"^```(?:json)?\s*|\s*```$", "", response.text.strip())
         try:
-            data = json.loads(text)
-        except json.JSONDecodeError as exc:
-            raise LLMProviderError(
-                f"{self.label} returned unparseable analysis JSON"
+            data, _stage = extract_json_object(response.text, parsed=response.parsed)
+            enrichment = validate_enrichment(data)
+        except (JSONExtractionError, SchemaValidationError) as exc:
+            diagnostics = ParseDiagnostics.from_failure(
+                provider=self.name,
+                model=model,
+                response_text=response.text,
+                exc=exc,
+                mime_type=response.mime_type,
+                finish_reason=response.finish_reason,
+            )
+            raise AnalysisParseError(
+                f"{self.label} returned unparseable analysis JSON "
+                f"(failed at stage {exc.stage!r}: {exc})",
+                diagnostics=diagnostics,
             ) from exc
-        if not isinstance(data, dict):
-            raise LLMProviderError(f"{self.label} analysis JSON was not an object")
-        return data, response
+        return enrichment.model_dump(), response

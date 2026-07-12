@@ -186,6 +186,7 @@ class GeminiProvider(BaseLLMProvider):
         system: str | None = None,
         tools: list[dict] | None = None,
         max_tokens: int = 16000,
+        json_schema: dict | None = None,
     ) -> LLMResponse:
         from google.genai import errors as genai_errors
         from google.genai import types
@@ -196,6 +197,11 @@ class GeminiProvider(BaseLLMProvider):
         config_kwargs: dict = {"max_output_tokens": max_tokens}
         if system:
             config_kwargs["system_instruction"] = system
+        if json_schema:
+            # Structured output: the API constrains generation to this JSON
+            # schema and usually hands back a pre-parsed object too.
+            config_kwargs["response_mime_type"] = "application/json"
+            config_kwargs["response_json_schema"] = json_schema
         if tools:
             declarations = [
                 types.FunctionDeclaration(
@@ -250,8 +256,18 @@ class GeminiProvider(BaseLLMProvider):
         ]
         usage = response.usage_metadata
         raw_content = None
+        finish_reason = ""
         if response.candidates:
-            raw_content = response.candidates[0].content
+            candidate = response.candidates[0]
+            raw_content = candidate.content
+            reason = getattr(candidate, "finish_reason", None)
+            if reason is not None:
+                finish_reason = getattr(reason, "name", None) or str(reason)
+        parsed = getattr(response, "parsed", None) if json_schema else None
+        if parsed is not None and not isinstance(parsed, dict):
+            # The SDK may return a pydantic model or list; keep only plain
+            # dicts — everything else goes through the text pipeline.
+            parsed = None
         return LLMResponse(
             text=text,
             tool_calls=tool_calls,
@@ -262,4 +278,7 @@ class GeminiProvider(BaseLLMProvider):
             provider=self.name,
             latency_ms=latency_ms,
             raw=raw_content,
+            parsed=parsed,
+            finish_reason=finish_reason,
+            mime_type="application/json" if json_schema else "",
         )

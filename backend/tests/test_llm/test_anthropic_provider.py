@@ -141,3 +141,19 @@ def test_requires_credentials(monkeypatch):
     monkeypatch.delenv("ANTHROPIC_AUTH_TOKEN", raising=False)
     with pytest.raises(LLMProviderError, match="ANTHROPIC_API_KEY"):
         AnthropicProvider()
+
+
+async def test_json_schema_is_accepted_and_ignored():
+    """Interface parity: json_schema must not change the Anthropic request."""
+    client = _fake_client([_api_response(_text_block('{"summary": "s"}'))])
+    provider = AnthropicProvider(client=client)
+    response = await provider.chat(
+        "claude-sonnet-5",
+        [text_message("user", "analyze")],
+        json_schema={"type": "object"},
+    )
+    kwargs = client.messages.create.await_args.kwargs
+    assert "json_schema" not in kwargs
+    assert "response_format" not in kwargs
+    assert response.parsed is None
+    assert response.text == '{"summary": "s"}'

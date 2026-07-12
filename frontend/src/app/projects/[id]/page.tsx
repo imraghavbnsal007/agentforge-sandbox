@@ -65,7 +65,10 @@ export default async function ProjectDetailPage({
         </Link>
         <div className="mt-2 flex flex-wrap items-center gap-3">
           <h2 className="text-2xl font-semibold tracking-tight">{project.name}</h2>
-          <AnalysisStatusBadge status={project.analysis_status} />
+          <AnalysisStatusBadge
+            status={project.analysis_status}
+            warning={Boolean(analysis?.enrichment_warning)}
+          />
           {analysis?.project_type && (
             <span className="rounded-full bg-slate-800 px-2.5 py-0.5 text-xs font-medium text-white">
               {analysis.project_type}
@@ -108,6 +111,14 @@ export default async function ProjectDetailPage({
       {analysis?.error && (
         <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
           <span className="font-medium">Analysis failed:</span> {analysis.error}
+        </div>
+      )}
+
+      {analysis?.enrichment_warning && !analyzing && (
+        <div className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
+          <span className="font-medium">Partial analysis:</span> Repository facts
+          were analyzed successfully, but AI enrichment could not be parsed. Use{" "}
+          <span className="font-medium">Re-analyze Repository</span> to retry.
         </div>
       )}
 

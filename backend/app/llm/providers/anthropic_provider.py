@@ -82,7 +82,11 @@ class AnthropicProvider(BaseLLMProvider):
         system: str | None = None,
         tools: list[dict] | None = None,
         max_tokens: int = 16000,
+        json_schema: dict | None = None,
     ) -> LLMResponse:
+        # json_schema is accepted for interface parity but intentionally
+        # unused: Anthropic has no equivalent server-side JSON mode here, so
+        # callers parse the text response defensively instead.
         model = self.normalize_model_id(model)
         kwargs: dict = {
             "model": model,

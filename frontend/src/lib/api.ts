@@ -188,6 +188,7 @@ export interface Analysis {
   health_breakdown: Record<string, HealthPart> | null;
   analysis_logs: string | null;
   error: string | null;
+  enrichment_warning: string | null;
   started_at: string;
   finished_at: string | null;
   file_summaries: FileSummary[];

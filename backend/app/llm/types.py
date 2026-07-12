@@ -14,6 +14,18 @@ class LLMProviderError(Exception):
     """
 
 
+class AnalysisParseError(LLMProviderError):
+    """A repository-analysis response could not be parsed as JSON.
+
+    Carries sanitized ParseDiagnostics so callers can persist a debuggable
+    record without ever touching the raw (potentially huge) response.
+    """
+
+    def __init__(self, message: str, diagnostics: object | None = None) -> None:
+        super().__init__(message)
+        self.diagnostics = diagnostics
+
+
 @dataclass
 class LLMToolCall:
     id: str
@@ -35,6 +47,14 @@ class LLMResponse:
     # request when present. Some APIs require this: Gemini thinking models
     # reject reconstructed function-call parts that lack thought_signature.
     raw: object | None = None
+    # Provider-parsed structured output (e.g. Gemini response.parsed when a
+    # JSON schema was requested). Preferred over re-parsing `text`.
+    parsed: object | None = None
+    # Provider's verbatim finish reason (e.g. "STOP", "MAX_TOKENS") and the
+    # response MIME type when structured output was requested — diagnostics
+    # only, never used for control flow.
+    finish_reason: str = ""
+    mime_type: str = ""
 
 
 # Neutral message format:

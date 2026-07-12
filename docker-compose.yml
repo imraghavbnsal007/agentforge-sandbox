@@ -44,6 +44,14 @@ services:
     volumes:
       - ./backend:/app
       - ./sample_repo:/sample_repo:ro
+      # Read-only: /health reports backup freshness; nothing in the
+      # containers can write or delete backups.
+      - ./backups:/backups:ro
+      # Read-only: lets the in-container test suite verify the ops safety
+      # rules (Makefile has no 'down -v', scripts use set -euo pipefail...).
+      - ./Makefile:/repo/Makefile:ro
+      - ./scripts:/repo/scripts:ro
+      - ./.gitignore:/repo/.gitignore:ro
     depends_on:
       postgres:
         condition: service_healthy

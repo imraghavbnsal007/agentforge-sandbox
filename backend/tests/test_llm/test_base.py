@@ -60,15 +60,55 @@ async def test_plan_empty_raises():
 
 
 async def test_analyze_repository_parses_json_and_strips_fences():
-    provider = FakeProvider([text_response('```json\n{"summary": "ok"}\n```')])
+    provider = FakeProvider(
+        [text_response('```json\n{"summary": "ok", "suggestions": []}\n```')]
+    )
     data, _ = await provider.analyze_repository("fake-model", "prompt")
-    assert data == {"summary": "ok"}
+    assert data["summary"] == "ok"
+    assert data["suggestions"] == []
+    # Optional fields come back with safe defaults.
+    assert data["architecture_notes"] == ""
+    assert data["risk_areas"] == [] and data["file_purposes"] == []
 
 
-async def test_analyze_repository_bad_json_raises():
+async def test_analyze_repository_requests_structured_output():
+    from app.llm.analysis_schema import ENRICHMENT_JSON_SCHEMA
+
+    provider = FakeProvider(
+        [text_response('{"summary": "ok", "suggestions": []}')]
+    )
+    await provider.analyze_repository("fake-model", "prompt")
+    assert provider.calls[0]["json_schema"] is ENRICHMENT_JSON_SCHEMA
+
+
+async def test_analyze_repository_prefers_provider_parsed_object():
+    response = text_response("garbage text the parser would choke on")
+    response.parsed = {"summary": "from parsed", "suggestions": []}
+    provider = FakeProvider([response])
+    data, _ = await provider.analyze_repository("fake-model", "prompt")
+    assert data["summary"] == "from parsed"
+
+
+async def test_analyze_repository_bad_json_raises_with_diagnostics():
+    from app.llm.types import AnalysisParseError
+
     provider = FakeProvider([text_response("not json at all")])
-    with pytest.raises(LLMProviderError, match="unparseable"):
+    with pytest.raises(AnalysisParseError, match="unparseable") as excinfo:
         await provider.analyze_repository("fake-model", "prompt")
+    diagnostics = excinfo.value.diagnostics
+    assert diagnostics is not None
+    assert diagnostics.failed_stage == "balanced_scan"
+    assert diagnostics.response_length == len("not json at all")
+    assert "not json at all" in diagnostics.preview
+
+
+async def test_analyze_repository_missing_required_field_names_it():
+    from app.llm.types import AnalysisParseError
+
+    provider = FakeProvider([text_response('{"summary": "ok"}')])
+    with pytest.raises(AnalysisParseError, match="suggestions") as excinfo:
+        await provider.analyze_repository("fake-model", "prompt")
+    assert excinfo.value.diagnostics.failed_stage == "validation"
 
 
 def test_default_normalize_model_id_strips_own_prefix():
