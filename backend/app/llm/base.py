@@ -210,7 +210,7 @@ class BaseLLMProvider(ABC):
         response = await self.chat(
             model,
             [text_message("user", prompt)],
-            max_tokens=16000,
+            max_tokens=32768,
             json_schema=ENRICHMENT_JSON_SCHEMA,
         )
         try:

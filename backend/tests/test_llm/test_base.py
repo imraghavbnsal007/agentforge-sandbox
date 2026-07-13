@@ -97,7 +97,7 @@ async def test_analyze_repository_bad_json_raises_with_diagnostics():
         await provider.analyze_repository("fake-model", "prompt")
     diagnostics = excinfo.value.diagnostics
     assert diagnostics is not None
-    assert diagnostics.failed_stage == "balanced_scan"
+    assert diagnostics.failed_stage == "truncation_repair"
     assert diagnostics.response_length == len("not json at all")
     assert "not json at all" in diagnostics.preview
 

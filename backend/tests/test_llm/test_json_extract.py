@@ -7,6 +7,7 @@ import pytest
 from app.llm.json_extract import (
     JSONExtractionError,
     ParseDiagnostics,
+    _repair_truncated,
     extract_json_object,
     sanitize_preview,
 )
@@ -74,11 +75,21 @@ def test_braces_inside_strings_do_not_confuse_the_scanner():
     assert data == obj
 
 
-def test_unbalanced_truncated_json_raises_with_stage():
+def test_truncated_json_repaired():
+    """JSON that starts with { but is cut off gets repaired, not rejected."""
+    truncated = json.dumps(CLEAN)[:-1]  # remove trailing }
+    data, stage = extract_json_object(truncated)
+    assert stage == "truncation_repair"
+    assert data["summary"] == "ok"
+
+
+def test_unbalanced_with_leading_prose_tries_repair():
     truncated = json.dumps(CLEAN)[:-8]
+    # With leading prose the balanced-scan start shifts; repair applies to
+    # the first '{' onwards if nothing earlier worked.
     with pytest.raises(JSONExtractionError) as excinfo:
         extract_json_object("intro " + truncated)
-    assert excinfo.value.stage == "balanced_scan"
+    assert excinfo.value.stage == "truncation_repair"
 
 
 def test_empty_response_raises():
@@ -98,6 +109,87 @@ def test_top_level_array_is_not_an_object():
 def test_never_invents_data():
     with pytest.raises(JSONExtractionError):
         extract_json_object("The repository looks great, no JSON here.")
+
+
+# -- _repair_truncated -------------------------------------------------------
+
+
+def test_repair_truncated_mid_string_value():
+    text = '{"summary": "some text that gets trunca'
+    repaired = _repair_truncated(text)
+    assert repaired is not None
+    obj = json.loads(repaired)
+    assert obj["summary"] == "some text that gets trunca"
+
+
+def test_repair_truncated_after_complete_value():
+    text = '{"summary": "ok", "suggestions": [{"title": "x"}'
+    repaired = _repair_truncated(text)
+    assert repaired is not None
+    obj = json.loads(repaired)
+    assert obj["summary"] == "ok"
+    assert obj["suggestions"][0]["title"] == "x"
+
+
+def test_repair_truncated_after_trailing_comma():
+    text = '{"summary": "ok", "suggestions": [{"title": "x"},'
+    repaired = _repair_truncated(text)
+    assert repaired is not None
+    obj = json.loads(repaired)
+    assert len(obj["suggestions"]) == 1
+
+
+def test_repair_truncated_mid_key():
+    text = '{"summary": "ok", "archite'
+    repaired = _repair_truncated(text)
+    assert repaired is not None
+    obj = json.loads(repaired)
+    assert obj["summary"] == "ok"
+
+
+def test_repair_truncated_after_colon():
+    text = '{"summary": "ok", "risk_areas":'
+    repaired = _repair_truncated(text)
+    assert repaired is not None
+    obj = json.loads(repaired)
+    assert obj["summary"] == "ok"
+    assert "risk_areas" not in obj
+
+
+def test_repair_returns_none_for_balanced_json():
+    text = json.dumps(CLEAN)
+    assert _repair_truncated(text) is None
+
+
+def test_repair_returns_none_for_non_object():
+    assert _repair_truncated("just text") is None
+    assert _repair_truncated("") is None
+    assert _repair_truncated("[1,2,3") is None
+
+
+def test_repair_handles_escaped_quotes():
+    text = r'{"summary": "has \"escaped\" quotes and trunca'
+    repaired = _repair_truncated(text)
+    assert repaired is not None
+    obj = json.loads(repaired)
+    assert "escaped" in obj["summary"]
+
+
+def test_repair_deeply_nested():
+    text = '{"a": {"b": [{"c": "val'
+    repaired = _repair_truncated(text)
+    assert repaired is not None
+    obj = json.loads(repaired)
+    assert obj["a"]["b"][0]["c"] == "val"
+
+
+def test_repair_integrated_via_extract():
+    """Truncated JSON goes through the full pipeline and lands on truncation_repair."""
+    text = '{"summary": "truncated analysis", "suggestions": [{"title": "add tests", "description": "tests are'
+    data, stage = extract_json_object(text)
+    assert stage == "truncation_repair"
+    assert data["summary"] == "truncated analysis"
+    assert data["suggestions"][0]["title"] == "add tests"
 
 
 # -- sanitize_preview -------------------------------------------------------

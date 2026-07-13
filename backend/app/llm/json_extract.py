@@ -75,6 +75,68 @@ def _try_loads(candidate: str):
     return json.loads(repaired, strict=False)
 
 
+def _repair_truncated(text: str) -> str | None:
+    """Best-effort repair of JSON truncated mid-generation (MAX_TOKENS).
+
+    Walks the text tracking bracket nesting and string state.  If the text
+    ends with unclosed structures, closes them.  Returns the repaired
+    string, or None if already balanced or not starting with '{'.
+    """
+    if not text or text[0] != "{":
+        return None
+
+    stack: list[str] = []
+    in_string = False
+    escaped = False
+    stripped_colon = False
+
+    for ch in text:
+        if in_string:
+            if escaped:
+                escaped = False
+            elif ch == "\\":
+                escaped = True
+            elif ch == '"':
+                in_string = False
+        else:
+            if ch == '"':
+                in_string = True
+            elif ch == "{":
+                stack.append("}")
+            elif ch == "[":
+                stack.append("]")
+            elif ch in ("}", "]") and stack:
+                stack.pop()
+
+    if not stack:
+        return None
+
+    result = text
+    if in_string:
+        result += '"'
+
+    result = result.rstrip()
+    while result and result[-1] in (",", ":"):
+        if result[-1] == ":":
+            stripped_colon = True
+        result = result[:-1].rstrip()
+
+    if stripped_colon and result.endswith('"'):
+        q = result.rfind('"', 0, len(result) - 1)
+        if q >= 0:
+            result = result[:q].rstrip().rstrip(",").rstrip()
+
+    if in_string and result.endswith('"'):
+        q = result.rfind('"', 0, len(result) - 1)
+        if q >= 0:
+            before = result[:q].rstrip()
+            if before and before[-1] in (",", "{", "["):
+                result = before.rstrip(",").rstrip()
+
+    result += "".join(reversed(stack))
+    return result
+
+
 def _balanced_objects(text: str):
     """Yield candidate substrings that are balanced top-level {...} objects."""
     yielded = 0
@@ -149,8 +211,18 @@ def extract_json_object(
         except json.JSONDecodeError:
             continue
 
+    # 5. Truncation repair — close unclosed brackets (MAX_TOKENS cutoff).
+    repaired = _repair_truncated(cleaned)
+    if repaired is not None:
+        try:
+            obj = _try_loads(repaired)
+            if isinstance(obj, dict):
+                return obj, "truncation_repair"
+        except json.JSONDecodeError:
+            pass
+
     raise JSONExtractionError(
-        "balanced_scan", "no parseable top-level JSON object found in response"
+        "truncation_repair", "no parseable top-level JSON object found in response"
     )
 
 
