@@ -3,6 +3,7 @@
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { LLMPicker, type LLMSelection } from "@/components/LLMPicker";
+import { Button } from "@/components/ui/Button";
 import { createTask, type LLMOptions, type Project } from "@/lib/api";
 
 function selectionForProject(
@@ -83,13 +84,17 @@ export function NewTaskForm({
   return (
     <form onSubmit={onSubmit} className="space-y-5">
       <div>
-        <label className="mb-1.5 block text-sm font-medium text-slate-700">
+        <label
+          htmlFor="task-project"
+          className="mb-1.5 block text-sm font-medium text-ink-mid"
+        >
           Project
         </label>
         <select
+          id="task-project"
           value={projectId}
           onChange={(e) => onProjectChange(Number(e.target.value))}
-          className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm focus:border-slate-500 focus:outline-none"
+          className="field"
         >
           {projects.map((p) => (
             <option key={p.id} value={p.id}>
@@ -100,48 +105,57 @@ export function NewTaskForm({
       </div>
 
       <div>
-        <label className="mb-1.5 block text-sm font-medium text-slate-700">
+        <label
+          htmlFor="task-title"
+          className="mb-1.5 block text-sm font-medium text-ink-mid"
+        >
           Title
         </label>
         <input
+          id="task-title"
           value={title}
           onChange={(e) => setTitle(e.target.value)}
           required
           maxLength={200}
           placeholder="Add a divide function"
-          className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-slate-500 focus:outline-none"
+          className="field"
         />
       </div>
 
       <div>
-        <label className="mb-1.5 block text-sm font-medium text-slate-700">
+        <label
+          htmlFor="task-request"
+          className="mb-1.5 block text-sm font-medium text-ink-mid"
+        >
           Feature request
         </label>
         <textarea
+          id="task-request"
           value={request}
           onChange={(e) => setRequest(e.target.value)}
           required
           rows={6}
-          placeholder="Describe the feature you want the agent to implement in the sample repo…"
-          className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-slate-500 focus:outline-none"
+          placeholder="Describe the feature you want the agent to implement…"
+          className="field resize-y"
         />
       </div>
 
       <LLMPicker options={options} value={llm} onChange={setLlm} />
 
       {error && (
-        <p className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">
+        <p className="rounded-lg bg-red-500/10 px-3 py-2 text-sm text-red-300 ring-1 ring-inset ring-red-400/25">
           {error}
         </p>
       )}
 
-      <button
+      <Button
         type="submit"
-        disabled={submitting || projects.length === 0}
-        className="rounded-lg bg-slate-900 px-5 py-2.5 text-sm font-medium text-white hover:bg-slate-700 disabled:cursor-not-allowed disabled:opacity-50"
+        loading={submitting}
+        disabled={projects.length === 0}
+        className="w-full sm:w-auto"
       >
         {submitting ? "Submitting…" : "Run the agent"}
-      </button>
+      </Button>
     </form>
   );
 }

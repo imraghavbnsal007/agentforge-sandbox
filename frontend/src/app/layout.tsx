@@ -1,5 +1,7 @@
 import type { Metadata } from "next";
 import { ChunkGuard } from "@/components/ChunkGuard";
+import { Providers } from "@/components/Providers";
+import { Sidebar } from "@/components/Sidebar";
 import "./globals.css";
 
 export const metadata: Metadata = {
@@ -12,24 +14,25 @@ export default function RootLayout({
 }: Readonly<{ children: React.ReactNode }>) {
   return (
     <html lang="en">
-      <body className="min-h-screen bg-slate-50 text-slate-900 antialiased">
+      <body className="min-h-screen bg-surface-0 font-sans text-ink antialiased">
         <ChunkGuard />
-        <header className="border-b border-slate-200 bg-white">
-          <div className="mx-auto flex max-w-5xl items-center gap-3 px-6 py-4">
-            <span className="text-xl">⚒️</span>
-            <h1 className="text-lg font-semibold tracking-tight">AgentForge</h1>
-            <nav className="ml-6 flex items-center gap-4 text-sm text-slate-600">
-              <a href="/" className="hover:text-slate-900">Dashboard</a>
-              <a href="/projects" className="hover:text-slate-900">Projects</a>
-              <a href="/tasks/new" className="hover:text-slate-900">New Task</a>
-              <a href="/usage" className="hover:text-slate-900">Usage</a>
-            </nav>
-            <span className="ml-auto hidden text-sm text-slate-400 sm:block">
-              AI engineering assistant
-            </span>
+        <Providers>
+          <a
+            href="#main-content"
+            className="sr-only focus:not-sr-only focus:absolute focus:left-4 focus:top-4 focus:z-50 focus:rounded-lg focus:bg-surface-3 focus:px-4 focus:py-2 focus:text-sm focus:text-ink"
+          >
+            Skip to content
+          </a>
+          <div className="flex min-h-screen flex-col md:flex-row">
+            <Sidebar />
+            <main
+              id="main-content"
+              className="mx-auto w-full max-w-6xl flex-1 px-4 py-6 sm:px-8 sm:py-10"
+            >
+              {children}
+            </main>
           </div>
-        </header>
-        <main className="mx-auto max-w-5xl px-6 py-8">{children}</main>
+        </Providers>
       </body>
     </html>
   );

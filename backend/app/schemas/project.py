@@ -49,6 +49,7 @@ class ProjectRead(BaseModel):
     primary_language: str | None = None
     framework: str | None = None
     test_command: str | None = None
+    health_score: int | None = None
 
 
 class ProjectDetail(ProjectRead):

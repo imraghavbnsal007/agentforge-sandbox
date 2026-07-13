@@ -1,12 +1,16 @@
 import Link from "next/link";
 import { AutoRefresh } from "@/components/AutoRefresh";
 import { ModeBadge } from "@/components/ModeBadge";
-import { StatusBadge } from "@/components/StatusBadge";
+import { TaskBoard } from "@/components/TaskBoard";
+import { buttonClasses } from "@/components/ui/Button";
+import { IconPlus } from "@/components/ui/Icons";
 import {
   getConfig,
+  getLLMOptions,
   getProjects,
   getTasks,
   type AppConfig,
+  type LLMOptions,
   type Project,
   type Task,
 } from "@/lib/api";
@@ -17,120 +21,70 @@ export default async function Dashboard() {
   let tasks: Task[];
   let projects: Project[];
   let config: AppConfig;
+  let options: LLMOptions;
   try {
-    [tasks, projects, config] = await Promise.all([
+    [tasks, projects, config, options] = await Promise.all([
       getTasks(),
       getProjects(),
       getConfig(),
+      getLLMOptions(),
     ]);
   } catch {
     return (
-      <div className="rounded-lg border border-red-200 bg-red-50 p-6 text-red-700">
+      <div className="card border-red-500/30 bg-red-500/5 p-6 text-red-300">
         <p className="font-medium">Backend unreachable</p>
-        <p className="mt-1 text-sm">
+        <p className="mt-1 text-sm text-red-300/80">
           Could not load tasks. Is the API running? Try{" "}
-          <code className="rounded bg-red-100 px-1">docker compose up</code>{" "}
+          <code className="rounded bg-red-500/10 px-1.5 py-0.5">docker compose up</code>{" "}
           and refresh.
         </p>
       </div>
     );
   }
 
-  const projectNames = new Map(projects.map((p) => [p.id, p.name]));
-
   return (
-    <div>
+    <div className="space-y-6">
       <AutoRefresh />
-      <div className="mb-6 flex items-center justify-between">
+      <div className="flex flex-wrap items-start justify-between gap-4">
         <div>
           <div className="flex items-center gap-3">
-            <h2 className="text-2xl font-semibold tracking-tight">Tasks</h2>
+            <h2 className="text-2xl font-semibold tracking-tight text-ink">Tasks</h2>
             <ModeBadge
               mode={config.agent_mode}
               model={config.agent_mode === "llm" ? config.anthropic_model : undefined}
             />
           </div>
-          <p className="mt-1 text-sm text-slate-500">
+          <p className="mt-1 text-sm text-ink-dim">
             Feature requests handled by the agent
           </p>
           {config.agent_mode === "llm" && !config.api_key_configured && (
-            <p className="mt-2 rounded bg-amber-50 px-2 py-1 text-xs text-amber-700">
+            <p className="mt-2 rounded-lg bg-amber-500/10 px-3 py-1.5 text-xs text-amber-300 ring-1 ring-inset ring-amber-400/25">
               ⚠ AGENT_MODE=llm but no ANTHROPIC_API_KEY configured — runs will fail.
             </p>
           )}
         </div>
-        <Link
-          href="/tasks/new"
-          className="rounded-lg bg-slate-900 px-4 py-2 text-sm font-medium text-white hover:bg-slate-700"
-        >
+        <Link href="/tasks/new" className={buttonClasses("primary")}>
+          <IconPlus className="h-4 w-4" />
           New Task
         </Link>
       </div>
 
       {tasks.length === 0 ? (
-        <div className="rounded-lg border border-dashed border-slate-300 bg-white p-10 text-center text-slate-500">
-          No tasks yet. Seed some data with{" "}
-          <code className="rounded bg-slate-100 px-1">make seed</code>.
+        <div className="card border-dashed p-12 text-center text-ink-dim">
+          <p className="text-sm">
+            No tasks yet. Seed some data with{" "}
+            <code className="rounded bg-surface-3 px-1.5 py-0.5 text-xs">make seed</code>{" "}
+            or create your first task.
+          </p>
+          <Link
+            href="/tasks/new"
+            className={`${buttonClasses("secondary", "sm")} mt-4`}
+          >
+            Create a task
+          </Link>
         </div>
       ) : (
-        <div className="overflow-hidden rounded-lg border border-slate-200 bg-white">
-          <table className="w-full text-left text-sm">
-            <thead className="border-b border-slate-200 bg-slate-50 text-xs uppercase tracking-wide text-slate-500">
-              <tr>
-                <th className="px-4 py-3">Task</th>
-                <th className="px-4 py-3">Project</th>
-                <th className="px-4 py-3">Status</th>
-                <th className="px-4 py-3">Mode</th>
-                <th className="px-4 py-3">Created</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-slate-100">
-              {tasks.map((task) => (
-                <tr key={task.id} className="hover:bg-slate-50">
-                  <td className="px-4 py-3">
-                    <Link href={`/tasks/${task.id}`} className="group block">
-                      <p className="font-medium text-slate-900 group-hover:underline">
-                        {task.title}
-                      </p>
-                      <p className="mt-0.5 line-clamp-1 max-w-md text-xs text-slate-500">
-                        {task.request}
-                      </p>
-                    </Link>
-                  </td>
-                  <td className="px-4 py-3 text-slate-600">
-                    {projectNames.get(task.project_id) ?? `#${task.project_id}`}
-                  </td>
-                  <td className="px-4 py-3">
-                    <StatusBadge status={task.status} />
-                  </td>
-                  <td className="px-4 py-3">
-                    <span className="flex items-center gap-2">
-                      {task.latest_run_mode ? (
-                        <ModeBadge mode={task.latest_run_mode} />
-                      ) : (
-                        <span className="text-xs text-slate-400">—</span>
-                      )}
-                      {task.latest_run_pr_url && (
-                        <a
-                          href={task.latest_run_pr_url}
-                          target="_blank"
-                          rel="noreferrer"
-                          className="text-xs font-medium text-emerald-600 hover:underline"
-                          title="View pull request"
-                        >
-                          PR ↗
-                        </a>
-                      )}
-                    </span>
-                  </td>
-                  <td className="px-4 py-3 text-slate-500">
-                    {new Date(task.created_at).toLocaleString()}
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+        <TaskBoard tasks={tasks} projects={projects} profiles={options.profiles} />
       )}
     </div>
   );

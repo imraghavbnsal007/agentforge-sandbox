@@ -108,6 +108,7 @@ export interface Project {
   primary_language: string | null;
   framework: string | null;
   test_command: string | null;
+  health_score: number | null;
 }
 
 export interface FileSummary {

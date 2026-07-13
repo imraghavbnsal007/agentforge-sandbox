@@ -2,6 +2,7 @@
 
 import { useRouter } from "next/navigation";
 import { useState } from "react";
+import { Button } from "@/components/ui/Button";
 import { approveTask, rejectTask } from "@/lib/api";
 
 export function ReviewActions({ taskId }: { taskId: number }) {
@@ -26,30 +27,31 @@ export function ReviewActions({ taskId }: { taskId: number }) {
   }
 
   return (
-    <div className="rounded-lg border border-indigo-200 bg-indigo-50 px-4 py-4">
-      <p className="text-sm font-medium text-indigo-900">
+    <div className="card border-violet-500/25 bg-violet-500/[0.06] px-5 py-4">
+      <p className="text-sm font-medium text-violet-200">
         Tests passed — the changes below are ready for your review.
       </p>
-      <p className="mt-0.5 text-xs text-indigo-700">
+      <p className="mt-0.5 text-xs text-violet-300/70">
         Approving creates a branch, commits the diff, pushes, and opens a pull
         request on GitHub.
       </p>
-      <div className="mt-3 flex items-center gap-3">
-        <button
+      <div className="mt-3 flex flex-wrap items-center gap-3">
+        <Button
           onClick={() => act("approve")}
           disabled={busy !== null}
-          className="rounded-lg bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-500 disabled:opacity-50"
+          loading={busy === "approve"}
         >
           {busy === "approve" ? "Publishing…" : "Approve & Create PR"}
-        </button>
-        <button
+        </Button>
+        <Button
+          variant="secondary"
           onClick={() => act("reject")}
           disabled={busy !== null}
-          className="rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50"
+          loading={busy === "reject"}
         >
           {busy === "reject" ? "Rejecting…" : "Reject"}
-        </button>
-        {error && <span className="text-xs text-red-600">{error}</span>}
+        </Button>
+        {error && <span className="text-xs text-red-400">{error}</span>}
       </div>
     </div>
   );

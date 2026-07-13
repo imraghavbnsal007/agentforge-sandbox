@@ -28,6 +28,7 @@ def _to_read(project: Project) -> ProjectRead:
         item.primary_language = (latest.languages or [None])[0]
         item.framework = (latest.frameworks or [None])[0]
         item.test_command = latest.test_command
+        item.health_score = latest.health_score
     return item
 
 

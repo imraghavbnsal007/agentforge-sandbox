@@ -14,6 +14,53 @@ const PROFILE_LABELS: Record<string, string> = {
   premium: "Premium",
 };
 
+const PROFILE_HINTS: Record<string, string> = {
+  cheap: "Fastest & lowest cost",
+  balanced: "Good quality / cost balance",
+  premium: "Highest quality",
+};
+
+function ProfileChip({
+  name,
+  label,
+  hint,
+  selected,
+  onSelect,
+}: {
+  name: string;
+  label: string;
+  hint?: string;
+  selected: boolean;
+  onSelect: () => void;
+}) {
+  return (
+    <label
+      className={`flex cursor-pointer flex-col gap-0.5 rounded-xl border px-3.5 py-2.5 text-sm transition-all duration-150 ${
+        selected
+          ? "border-indigo-400/60 bg-accent-soft text-ink shadow-[0_0_0_1px_rgba(129,140,248,0.25)]"
+          : "border-line-strong bg-surface-2 text-ink-mid hover:border-[rgba(255,255,255,0.24)] hover:text-ink"
+      }`}
+    >
+      <span className="flex items-center gap-2 font-medium">
+        <input
+          type="radio"
+          name="profile"
+          className="sr-only"
+          checked={selected}
+          onChange={onSelect}
+          aria-label={`${label} execution profile`}
+        />
+        <span
+          aria-hidden
+          className={`h-2 w-2 rounded-full ${selected ? "bg-accent" : "bg-line-strong"}`}
+        />
+        {label}
+      </span>
+      {hint && <span className="pl-4 text-[11px] text-ink-dim">{hint}</span>}
+    </label>
+  );
+}
+
 export function LLMPicker({
   options,
   value,
@@ -27,55 +74,48 @@ export function LLMPicker({
   const activeProfile = options.profiles.find((p) => p.name === value.profile);
 
   return (
-    <div className="space-y-4 rounded-lg border border-slate-200 bg-slate-50 p-4">
+    <fieldset className="space-y-4 rounded-xl border border-line bg-surface-2/50 p-4">
+      <legend className="sr-only">Model selection</legend>
       <div>
-        <label className="mb-1.5 block text-sm font-medium text-slate-700">
+        <p className="mb-2 block text-sm font-medium text-ink-mid">
           Execution Profile
-        </label>
-        <div className="flex flex-wrap gap-2">
+        </p>
+        <div
+          className="grid grid-cols-2 gap-2 sm:grid-cols-4"
+          role="radiogroup"
+          aria-label="Execution profile"
+        >
           {options.profiles.map((profile) => (
-            <label
+            <ProfileChip
               key={profile.name}
-              className={`flex cursor-pointer items-center gap-2 rounded-lg border px-3 py-2 text-sm ${
-                value.profile === profile.name
-                  ? "border-slate-900 bg-white font-medium"
-                  : "border-slate-300 bg-white text-slate-600"
-              }`}
-            >
-              <input
-                type="radio"
-                name="profile"
-                className="accent-slate-900"
-                checked={value.profile === profile.name}
-                onChange={() => onChange({ ...value, profile: profile.name })}
-              />
-              {PROFILE_LABELS[profile.name] ?? profile.name}
-            </label>
-          ))}
-          <label
-            className={`flex cursor-pointer items-center gap-2 rounded-lg border px-3 py-2 text-sm ${
-              value.profile === "custom"
-                ? "border-slate-900 bg-white font-medium"
-                : "border-slate-300 bg-white text-slate-600"
-            }`}
-          >
-            <input
-              type="radio"
-              name="profile"
-              className="accent-slate-900"
-              checked={value.profile === "custom"}
-              onChange={() => onChange({ ...value, profile: "custom" })}
+              name={profile.name}
+              label={PROFILE_LABELS[profile.name] ?? profile.name}
+              hint={PROFILE_HINTS[profile.name]}
+              selected={value.profile === profile.name}
+              onSelect={() => onChange({ ...value, profile: profile.name })}
             />
-            Custom
-          </label>
+          ))}
+          <ProfileChip
+            name="custom"
+            label="Custom"
+            hint="Pick provider & model"
+            selected={value.profile === "custom"}
+            onSelect={() => onChange({ ...value, profile: "custom" })}
+          />
         </div>
       </div>
 
       {value.profile === "custom" ? (
         <div className="flex flex-wrap gap-3">
-          <div className="w-52">
-            <label className="mb-1 block text-xs text-slate-500">AI Provider</label>
+          <div className="w-full sm:w-52">
+            <label
+              htmlFor="llm-provider"
+              className="mb-1 block text-xs text-ink-dim"
+            >
+              AI Provider
+            </label>
             <select
+              id="llm-provider"
               value={value.provider}
               onChange={(e) => {
                 const provider = options.providers.find(
@@ -87,7 +127,7 @@ export function LLMPicker({
                   model: provider?.models[0] ?? "",
                 });
               }}
-              className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm"
+              className="field"
             >
               {options.providers.map((p) => (
                 <option
@@ -105,12 +145,15 @@ export function LLMPicker({
               ))}
             </select>
           </div>
-          <div className="w-52">
-            <label className="mb-1 block text-xs text-slate-500">Model</label>
+          <div className="w-full sm:w-52">
+            <label htmlFor="llm-model" className="mb-1 block text-xs text-ink-dim">
+              Model
+            </label>
             <select
+              id="llm-model"
               value={value.model}
               onChange={(e) => onChange({ ...value, model: e.target.value })}
-              className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm"
+              className="field"
             >
               {(selectedProvider?.models ?? []).map((m) => (
                 <option key={m} value={m}>
@@ -122,7 +165,7 @@ export function LLMPicker({
         </div>
       ) : (
         activeProfile && (
-          <p className="text-xs text-slate-500">
+          <p className="text-xs text-ink-dim">
             {Object.entries(activeProfile.phases)
               .filter(([phase]) => ["planning", "coding", "summarize"].includes(phase))
               .map(([phase, spec]) => `${phase}: ${spec}`)
@@ -131,10 +174,10 @@ export function LLMPicker({
         )
       )}
 
-      <div className="flex gap-6 text-sm">
+      <div className="flex flex-wrap gap-x-6 gap-y-1 text-sm">
         <span>
-          <span className="text-slate-400">Estimated Cost:</span>{" "}
-          <span className="font-medium text-slate-800">
+          <span className="text-ink-dim">Estimated Cost:</span>{" "}
+          <span className="font-medium text-ink">
             {value.profile === "custom"
               ? "varies by usage"
               : activeProfile?.estimated_cost_usd != null
@@ -143,8 +186,8 @@ export function LLMPicker({
           </span>
         </span>
         <span>
-          <span className="text-slate-400">Estimated Latency:</span>{" "}
-          <span className="font-medium text-slate-800">
+          <span className="text-ink-dim">Estimated Latency:</span>{" "}
+          <span className="font-medium text-ink">
             {value.profile === "custom"
               ? "—"
               : activeProfile
@@ -153,6 +196,6 @@ export function LLMPicker({
           </span>
         </span>
       </div>
-    </div>
+    </fieldset>
   );
 }

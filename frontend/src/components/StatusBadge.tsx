@@ -1,15 +1,17 @@
 import type { TaskStatus } from "@/lib/api";
 
+/* Color groups: completed=emerald · running=blue · queued=orange ·
+   failed=red · cancelled/rejected=gray · review=violet. */
 const STYLES: Record<TaskStatus, string> = {
-  pending: "bg-slate-100 text-slate-600",
-  planning: "bg-blue-100 text-blue-700",
-  coding: "bg-violet-100 text-violet-700",
-  testing: "bg-amber-100 text-amber-700",
-  ready_for_review: "bg-indigo-100 text-indigo-700",
-  publishing: "bg-cyan-100 text-cyan-700",
-  rejected: "bg-slate-200 text-slate-500",
-  completed: "bg-emerald-100 text-emerald-700",
-  failed: "bg-red-100 text-red-700",
+  pending: "bg-orange-500/12 text-orange-300 ring-orange-400/25",
+  planning: "bg-blue-500/12 text-blue-300 ring-blue-400/25",
+  coding: "bg-blue-500/12 text-blue-300 ring-blue-400/25",
+  testing: "bg-blue-500/12 text-blue-300 ring-blue-400/25",
+  publishing: "bg-blue-500/12 text-blue-300 ring-blue-400/25",
+  ready_for_review: "bg-violet-500/12 text-violet-300 ring-violet-400/25",
+  rejected: "bg-slate-500/12 text-slate-400 ring-slate-400/20",
+  completed: "bg-emerald-500/12 text-emerald-300 ring-emerald-400/25",
+  failed: "bg-red-500/12 text-red-300 ring-red-400/25",
 };
 
 const ACTIVE: TaskStatus[] = ["planning", "coding", "testing", "publishing"];
@@ -17,12 +19,15 @@ const ACTIVE: TaskStatus[] = ["planning", "coding", "testing", "publishing"];
 export function StatusBadge({ status }: { status: TaskStatus }) {
   return (
     <span
-      className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-0.5 text-xs font-medium ${STYLES[status]}`}
+      className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-0.5 text-xs font-medium ring-1 ring-inset ${STYLES[status]}`}
     >
       {ACTIVE.includes(status) && (
-        <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-current" />
+        <span className="relative flex h-1.5 w-1.5" aria-hidden>
+          <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-current opacity-60" />
+          <span className="relative inline-flex h-1.5 w-1.5 rounded-full bg-current" />
+        </span>
       )}
-      {status.replaceAll("_", " ")}
+      {status === "pending" ? "queued" : status.replaceAll("_", " ")}
     </span>
   );
 }

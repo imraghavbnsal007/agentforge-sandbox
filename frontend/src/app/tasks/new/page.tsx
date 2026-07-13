@@ -14,21 +14,27 @@ export default async function NewTaskPage({
 
   return (
     <div className="mx-auto max-w-2xl">
-      <Link href="/" className="text-sm text-slate-500 hover:text-slate-700">
+      <Link
+        href="/"
+        className="text-sm text-ink-dim transition-colors hover:text-ink-mid"
+      >
         ← Back to dashboard
       </Link>
-      <h2 className="mt-3 text-2xl font-semibold tracking-tight">New Task</h2>
-      <p className="mt-1 mb-6 text-sm text-slate-500">
-        Describe a feature request. The agent will plan it, edit the sample
-        repo, run the tests, and write a PR-style summary.
+      <h2 className="mt-3 text-2xl font-semibold tracking-tight text-ink">
+        New Task
+      </h2>
+      <p className="mt-1 mb-6 text-sm text-ink-dim">
+        Describe a feature request. The agent will plan it, edit the repo, run
+        the tests, and write a PR-style summary.
       </p>
       {projects.length === 0 ? (
-        <div className="rounded-lg border border-dashed border-slate-300 bg-white p-8 text-center text-slate-500">
-          No projects yet — run <code className="rounded bg-slate-100 px-1">make seed</code>{" "}
+        <div className="card border-dashed p-8 text-center text-sm text-ink-dim">
+          No projects yet — run{" "}
+          <code className="rounded bg-surface-3 px-1.5 py-0.5 text-xs">make seed</code>{" "}
           first.
         </div>
       ) : (
-        <div className="rounded-lg border border-slate-200 bg-white p-6">
+        <div className="card p-6">
           <NewTaskForm
             projects={projects}
             options={options}

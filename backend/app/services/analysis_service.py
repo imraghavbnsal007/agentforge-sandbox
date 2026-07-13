@@ -319,6 +319,7 @@ class AnalysisService:
                             self.session,
                             project_id=project.id,
                             analysis_id=analysis.id,
+                            log=log,
                         ),
                         spec,
                     )

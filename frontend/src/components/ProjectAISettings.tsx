@@ -2,6 +2,7 @@
 
 import { useRouter } from "next/navigation";
 import { useState } from "react";
+import { Button } from "@/components/ui/Button";
 import {
   updateProjectSettings,
   type LLMOptions,
@@ -43,13 +44,19 @@ export function ProjectAISettings({
   }
 
   return (
-    <div className="flex flex-wrap items-end gap-3 px-4 py-3">
-      <div className="w-44">
-        <label className="mb-1 block text-xs text-slate-500">Execution profile</label>
+    <div className="flex flex-wrap items-end gap-3 px-5 py-4">
+      <div className="w-full sm:w-44">
+        <label
+          htmlFor="ai-profile"
+          className="mb-1 block text-xs text-ink-dim"
+        >
+          Execution profile
+        </label>
         <select
+          id="ai-profile"
           value={profile}
           onChange={(e) => setProfile(e.target.value)}
-          className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm"
+          className="field"
         >
           <option value="">(default)</option>
           {options.profiles.map((p) => (
@@ -59,16 +66,22 @@ export function ProjectAISettings({
           ))}
         </select>
       </div>
-      <div className="w-44">
-        <label className="mb-1 block text-xs text-slate-500">Provider override</label>
+      <div className="w-full sm:w-44">
+        <label
+          htmlFor="ai-provider"
+          className="mb-1 block text-xs text-ink-dim"
+        >
+          Provider override
+        </label>
         <select
+          id="ai-provider"
           value={provider}
           onChange={(e) => {
             setProvider(e.target.value);
             const info = options.providers.find((p) => p.name === e.target.value);
             setModel(info?.models[0] ?? "");
           }}
-          className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm"
+          className="field"
         >
           <option value="">(none)</option>
           {options.providers
@@ -82,12 +95,15 @@ export function ProjectAISettings({
         </select>
       </div>
       {provider && (
-        <div className="w-44">
-          <label className="mb-1 block text-xs text-slate-500">Model</label>
+        <div className="w-full sm:w-44">
+          <label htmlFor="ai-model" className="mb-1 block text-xs text-ink-dim">
+            Model
+          </label>
           <select
+            id="ai-model"
             value={model}
             onChange={(e) => setModel(e.target.value)}
-            className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm"
+            className="field"
           >
             {(providerInfo?.models ?? []).map((m) => (
               <option key={m} value={m}>
@@ -97,14 +113,10 @@ export function ProjectAISettings({
           </select>
         </div>
       )}
-      <button
-        onClick={save}
-        disabled={busy}
-        className="rounded-lg bg-slate-900 px-4 py-2 text-sm font-medium text-white hover:bg-slate-700 disabled:opacity-50"
-      >
+      <Button onClick={save} loading={busy}>
         {busy ? "Saving…" : "Save"}
-      </button>
-      {message && <span className="text-xs text-slate-500">{message}</span>}
+      </Button>
+      {message && <span className="text-xs text-ink-dim">{message}</span>}
     </div>
   );
 }

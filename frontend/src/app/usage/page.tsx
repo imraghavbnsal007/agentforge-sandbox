@@ -4,9 +4,11 @@ export const dynamic = "force-dynamic";
 
 function StatCard({ label, value }: { label: string; value: string }) {
   return (
-    <div className="rounded-lg border border-slate-200 bg-white p-4">
-      <p className="text-xs uppercase tracking-wide text-slate-400">{label}</p>
-      <p className="mt-1 text-2xl font-semibold text-slate-900">{value}</p>
+    <div className="card p-4">
+      <p className="text-xs uppercase tracking-wide text-ink-dim">{label}</p>
+      <p className="mt-1 text-2xl font-semibold tabular-nums tracking-tight text-ink">
+        {value}
+      </p>
     </div>
   );
 }
@@ -14,46 +16,54 @@ function StatCard({ label, value }: { label: string; value: string }) {
 function BucketTable({ title, rows }: { title: string; rows: UsageBucket[] }) {
   if (rows.length === 0) return null;
   return (
-    <section className="overflow-hidden rounded-lg border border-slate-200 bg-white">
-      <h3 className="border-b border-slate-200 bg-slate-50 px-4 py-2.5 text-xs font-semibold uppercase tracking-wide text-slate-500">
+    <section className="card overflow-hidden">
+      <h3 className="border-b border-line bg-surface-2/60 px-5 py-3 text-xs font-semibold uppercase tracking-wider text-ink-dim">
         {title}
       </h3>
-      <table className="w-full text-left text-sm">
-        <thead className="text-xs uppercase tracking-wide text-slate-400">
-          <tr>
-            <th className="px-4 py-2">Key</th>
-            <th className="px-4 py-2 text-right">Requests</th>
-            <th className="px-4 py-2 text-right">Tokens in</th>
-            <th className="px-4 py-2 text-right">Tokens out</th>
-            <th className="px-4 py-2 text-right">Cost</th>
-            <th className="px-4 py-2 text-right">Avg latency</th>
-            <th className="px-4 py-2 text-right">Success</th>
-          </tr>
-        </thead>
-        <tbody className="divide-y divide-slate-100">
-          {rows.map((row) => (
-            <tr key={row.key}>
-              <td className="px-4 py-2 font-medium text-slate-800">{row.key}</td>
-              <td className="px-4 py-2 text-right text-slate-600">{row.requests}</td>
-              <td className="px-4 py-2 text-right text-slate-600">
-                {row.tokens_in.toLocaleString()}
-              </td>
-              <td className="px-4 py-2 text-right text-slate-600">
-                {row.tokens_out.toLocaleString()}
-              </td>
-              <td className="px-4 py-2 text-right text-slate-600">
-                ${row.cost_usd.toFixed(4)}
-              </td>
-              <td className="px-4 py-2 text-right text-slate-600">
-                {row.avg_latency_ms} ms
-              </td>
-              <td className="px-4 py-2 text-right text-slate-600">
-                {Math.round(row.success_rate * 100)}%
-              </td>
+      <div className="overflow-x-auto">
+        <table className="w-full text-left text-sm">
+          <thead className="text-xs uppercase tracking-wide text-ink-dim">
+            <tr>
+              <th className="px-5 py-2 font-medium">Key</th>
+              <th className="px-4 py-2 text-right font-medium">Requests</th>
+              <th className="px-4 py-2 text-right font-medium">Tokens in</th>
+              <th className="px-4 py-2 text-right font-medium">Tokens out</th>
+              <th className="px-4 py-2 text-right font-medium">Cost</th>
+              <th className="px-4 py-2 text-right font-medium">Avg latency</th>
+              <th className="px-5 py-2 text-right font-medium">Success</th>
             </tr>
-          ))}
-        </tbody>
-      </table>
+          </thead>
+          <tbody className="divide-y divide-line">
+            {rows.map((row) => (
+              <tr key={row.key} className="transition-colors hover:bg-surface-2/60">
+                <td className="px-5 py-2 font-medium text-ink">{row.key}</td>
+                <td className="px-4 py-2 text-right tabular-nums text-ink-mid">
+                  {row.requests}
+                </td>
+                <td className="px-4 py-2 text-right tabular-nums text-ink-mid">
+                  {row.tokens_in.toLocaleString()}
+                </td>
+                <td className="px-4 py-2 text-right tabular-nums text-ink-mid">
+                  {row.tokens_out.toLocaleString()}
+                </td>
+                <td className="px-4 py-2 text-right tabular-nums text-ink-mid">
+                  ${row.cost_usd.toFixed(4)}
+                </td>
+                <td className="px-4 py-2 text-right tabular-nums text-ink-mid">
+                  {row.avg_latency_ms} ms
+                </td>
+                <td
+                  className={`px-5 py-2 text-right tabular-nums ${
+                    row.success_rate < 1 ? "text-amber-300" : "text-ink-mid"
+                  }`}
+                >
+                  {Math.round(row.success_rate * 100)}%
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
     </section>
   );
 }
@@ -64,8 +74,8 @@ export default async function UsagePage() {
   return (
     <div className="space-y-6">
       <div>
-        <h2 className="text-2xl font-semibold tracking-tight">Usage</h2>
-        <p className="mt-1 text-sm text-slate-500">
+        <h2 className="text-2xl font-semibold tracking-tight text-ink">Usage</h2>
+        <p className="mt-1 text-sm text-ink-dim">
           LLM requests, tokens, cost, and reliability across providers
         </p>
       </div>
@@ -85,7 +95,7 @@ export default async function UsagePage() {
       </div>
 
       {report.total_requests === 0 ? (
-        <div className="rounded-lg border border-dashed border-slate-300 bg-white p-10 text-center text-slate-500">
+        <div className="card border-dashed p-12 text-center text-sm text-ink-dim">
           No LLM calls recorded yet — run a task in llm mode or analyze a repository.
         </div>
       ) : (

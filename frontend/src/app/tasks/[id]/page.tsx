@@ -19,8 +19,8 @@ function Section({
   children: React.ReactNode;
 }) {
   return (
-    <section className="overflow-hidden rounded-lg border border-slate-200 bg-white">
-      <h3 className="border-b border-slate-200 bg-slate-50 px-4 py-2.5 text-xs font-semibold uppercase tracking-wide text-slate-500">
+    <section className="card overflow-hidden">
+      <h3 className="border-b border-line bg-surface-2/60 px-5 py-3 text-xs font-semibold uppercase tracking-wider text-ink-dim">
         {title}
       </h3>
       {children}
@@ -54,11 +54,16 @@ export default async function TaskDetailPage({
       {inProgress && <AutoRefresh intervalMs={2000} />}
 
       <div>
-        <Link href="/" className="text-sm text-slate-500 hover:text-slate-700">
+        <Link
+          href="/"
+          className="text-sm text-ink-dim transition-colors hover:text-ink-mid"
+        >
           ← Back to dashboard
         </Link>
         <div className="mt-2 flex flex-wrap items-center gap-3">
-          <h2 className="text-2xl font-semibold tracking-tight">{task.title}</h2>
+          <h2 className="text-2xl font-semibold tracking-tight text-ink">
+            {task.title}
+          </h2>
           <StatusBadge status={task.status} />
           {run && (
             <ModeBadge
@@ -73,14 +78,14 @@ export default async function TaskDetailPage({
           )}
           {finished && <RetryButton taskId={task.id} />}
         </div>
-        <p className="mt-1 text-sm text-slate-500">
+        <p className="mt-1 text-sm text-ink-dim">
           Created {new Date(task.created_at).toLocaleString()}
           {task.runs.length > 1 && ` · ${task.runs.length} runs`}
         </p>
       </div>
 
       {run?.error && (
-        <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+        <div className="card border-red-500/30 bg-red-500/[0.06] px-5 py-3 text-sm text-red-300">
           <span className="font-medium">
             {task.status === "ready_for_review" ? "Publish failed:" : "Run failed:"}
           </span>{" "}
@@ -91,7 +96,7 @@ export default async function TaskDetailPage({
       {task.status === "ready_for_review" &&
         run &&
         run.test_results.length === 0 && (
-          <div className="rounded-lg border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-800">
+          <div className="card border-amber-500/30 bg-amber-500/[0.06] px-5 py-3 text-sm text-amber-300">
             <span className="font-medium">No automated test command detected.</span>{" "}
             These changes have not been verified by tests — review the diff
             carefully before approving.
@@ -101,27 +106,27 @@ export default async function TaskDetailPage({
       {task.status === "ready_for_review" && <ReviewActions taskId={task.id} />}
 
       {task.status === "publishing" && (
-        <div className="flex items-center gap-3 rounded-lg border border-cyan-200 bg-cyan-50 px-4 py-3 text-sm text-cyan-800">
-          <span className="h-2 w-2 animate-pulse rounded-full bg-cyan-500" />
+        <div className="card flex items-center gap-3 border-cyan-500/30 bg-cyan-500/[0.06] px-5 py-3 text-sm text-cyan-300">
+          <span className="h-2 w-2 animate-pulse rounded-full bg-cyan-400" aria-hidden />
           Publishing — cloning, applying changes, pushing, and opening the pull request…
         </div>
       )}
 
       {run?.pr_url && (
-        <div className="rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-4">
-          <p className="text-sm font-medium text-emerald-900">Pull request created</p>
+        <div className="card border-emerald-500/30 bg-emerald-500/[0.06] px-5 py-4">
+          <p className="text-sm font-medium text-emerald-300">Pull request created</p>
           <div className="mt-2 flex flex-wrap items-center gap-3 text-xs">
-            <span className="rounded bg-white px-2 py-1 font-mono text-slate-700 ring-1 ring-slate-200">
+            <span className="rounded-lg bg-surface-3 px-2 py-1 font-mono text-ink-mid ring-1 ring-inset ring-line-strong">
               {run.branch_name}
             </span>
-            <span className="rounded bg-white px-2 py-1 font-mono text-slate-700 ring-1 ring-slate-200">
+            <span className="rounded-lg bg-surface-3 px-2 py-1 font-mono text-ink-mid ring-1 ring-inset ring-line-strong">
               {run.commit_sha?.slice(0, 10)}
             </span>
             <a
               href={run.pr_url}
               target="_blank"
               rel="noreferrer"
-              className="rounded-lg bg-emerald-600 px-3 py-1.5 font-medium text-white hover:bg-emerald-500"
+              className="rounded-lg bg-gradient-to-b from-emerald-500 to-emerald-600 px-3 py-1.5 font-medium text-white shadow-[0_4px_14px_-4px_rgba(16,185,129,0.5)] transition-all hover:from-emerald-400 hover:to-emerald-600"
             >
               View Pull Request →
             </a>
@@ -130,21 +135,24 @@ export default async function TaskDetailPage({
       )}
 
       <Section title="Request">
-        <p className="whitespace-pre-wrap px-4 py-3 text-sm text-slate-700">
+        <p className="whitespace-pre-wrap px-5 py-4 text-sm leading-relaxed text-ink-mid">
           {task.request}
         </p>
       </Section>
 
       {inProgress && !run?.plan && (
-        <div className="flex items-center gap-3 rounded-lg border border-slate-200 bg-white px-4 py-6 text-sm text-slate-500">
-          <span className="h-2 w-2 animate-pulse rounded-full bg-blue-500" />
+        <div className="card flex items-center gap-3 px-5 py-6 text-sm text-ink-dim">
+          <span className="relative flex h-2 w-2" aria-hidden>
+            <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-blue-400 opacity-60" />
+            <span className="relative inline-flex h-2 w-2 rounded-full bg-blue-400" />
+          </span>
           The agent is working — this page refreshes automatically.
         </div>
       )}
 
       {run?.plan && (
         <Section title="Implementation plan">
-          <ol className="list-decimal space-y-1.5 px-4 py-3 pl-9 text-sm text-slate-700">
+          <ol className="list-decimal space-y-1.5 px-5 py-4 pl-10 text-sm text-ink-mid">
             {run.plan.map((step, i) => (
               <li key={i}>{step}</li>
             ))}
@@ -154,7 +162,7 @@ export default async function TaskDetailPage({
 
       {run?.log && (
         <Section title="Execution log">
-          <pre className="max-h-72 overflow-y-auto bg-slate-900 px-4 py-3 text-xs leading-5 text-slate-300">
+          <pre className="max-h-72 overflow-y-auto bg-[#07070c] px-5 py-3 text-xs leading-5 text-ink-mid">
             {run.log}
           </pre>
         </Section>
@@ -162,32 +170,32 @@ export default async function TaskDetailPage({
 
       {run && run.file_changes.length > 0 && (
         <Section title={`Files changed (${run.file_changes.length})`}>
-          <div className="divide-y divide-slate-200">
+          <div className="divide-y divide-line">
             {run.file_changes.map((change) => (
               <div key={change.id}>
-                <div className="flex items-center gap-2 bg-slate-100 px-4 py-2">
-                  <code className="text-xs font-medium text-slate-800">
+                <div className="flex items-center gap-2 bg-surface-2 px-5 py-2">
+                  <code className="text-xs font-medium text-ink">
                     {change.path}
                   </code>
-                  <span className="rounded bg-slate-200 px-1.5 py-0.5 text-[10px] font-medium uppercase text-slate-600">
+                  <span className="rounded bg-surface-3 px-1.5 py-0.5 text-[10px] font-medium uppercase text-ink-dim ring-1 ring-inset ring-line">
                     {change.change_type}
                   </span>
                   {change.is_binary && (
-                    <span className="rounded bg-amber-100 px-1.5 py-0.5 text-[10px] font-medium uppercase text-amber-700">
+                    <span className="rounded bg-amber-500/12 px-1.5 py-0.5 text-[10px] font-medium uppercase text-amber-300 ring-1 ring-inset ring-amber-400/25">
                       binary
                     </span>
                   )}
                 </div>
                 {change.is_binary ? (
-                  <div className="bg-slate-50 px-4 py-3 text-xs text-slate-500">
+                  <div className="bg-surface-2/50 px-5 py-3 text-xs text-ink-dim">
                     Binary file changed — textual diff unavailable.
                     {change.size_bytes != null && (
-                      <span className="ml-2 text-slate-400">
+                      <span className="ml-2">
                         {(change.size_bytes / 1024).toFixed(1)} KB
                       </span>
                     )}
                     {change.content_hash && (
-                      <span className="ml-2 font-mono text-slate-400">
+                      <span className="ml-2 font-mono">
                         sha256:{change.content_hash.slice(0, 12)}…
                       </span>
                     )}
@@ -203,34 +211,34 @@ export default async function TaskDetailPage({
 
       {tests.length > 0 && (
         <Section title="Test results">
-          <div className="px-4 py-3">
+          <div className="px-5 py-4">
             {tests.map((t) => (
               <div key={t.id} className="space-y-2">
-                <div className="flex gap-2 text-xs font-medium">
-                  <span className="rounded-full bg-emerald-100 px-2.5 py-1 text-emerald-700">
+                <div className="flex flex-wrap gap-2 text-xs font-medium">
+                  <span className="rounded-full bg-emerald-500/12 px-2.5 py-1 text-emerald-300 ring-1 ring-inset ring-emerald-400/25">
                     {t.passed} passed
                   </span>
                   <span
-                    className={`rounded-full px-2.5 py-1 ${t.failed > 0 ? "bg-red-100 text-red-700" : "bg-slate-100 text-slate-500"}`}
+                    className={`rounded-full px-2.5 py-1 ring-1 ring-inset ${t.failed > 0 ? "bg-red-500/12 text-red-300 ring-red-400/25" : "bg-surface-3 text-ink-dim ring-line"}`}
                   >
                     {t.failed} failed
                   </span>
                   <span
-                    className={`rounded-full px-2.5 py-1 ${t.errored > 0 ? "bg-amber-100 text-amber-700" : "bg-slate-100 text-slate-500"}`}
+                    className={`rounded-full px-2.5 py-1 ring-1 ring-inset ${t.errored > 0 ? "bg-amber-500/12 text-amber-300 ring-amber-400/25" : "bg-surface-3 text-ink-dim ring-line"}`}
                   >
                     {t.errored} errored
                   </span>
-                  <span className="rounded-full bg-slate-100 px-2.5 py-1 text-slate-500">
+                  <span className="rounded-full bg-surface-3 px-2.5 py-1 text-ink-dim ring-1 ring-inset ring-line">
                     {t.duration}s · {t.suite}
                   </span>
                 </div>
                 {t.output && (
-                  <pre className="max-h-56 overflow-y-auto rounded bg-slate-900 px-3 py-2 text-xs leading-5 text-slate-300">
+                  <pre className="max-h-56 overflow-y-auto rounded-lg border border-line bg-[#07070c] px-3 py-2 text-xs leading-5 text-ink-mid">
                     {t.output}
                   </pre>
                 )}
                 {t.stderr && (
-                  <pre className="max-h-40 overflow-y-auto rounded bg-red-950 px-3 py-2 text-xs leading-5 text-red-300">
+                  <pre className="max-h-40 overflow-y-auto rounded-lg border border-red-500/20 bg-red-950/40 px-3 py-2 text-xs leading-5 text-red-300">
                     {t.stderr}
                   </pre>
                 )}
@@ -242,22 +250,22 @@ export default async function TaskDetailPage({
 
       {run?.summary && (
         <Section title="Summary">
-          <div className="markdown px-4 py-3 text-sm text-slate-700">
+          <div className="markdown px-5 py-4 text-sm text-ink-mid">
             <Markdown>{run.summary}</Markdown>
           </div>
         </Section>
       )}
 
       {task.runs.length > 0 && (
-        <details className="overflow-hidden rounded-lg border border-slate-200 bg-white">
-          <summary className="cursor-pointer select-none px-4 py-2.5 text-xs font-semibold uppercase tracking-wide text-slate-500 hover:bg-slate-50">
+        <details className="card overflow-hidden">
+          <summary className="cursor-pointer select-none px-5 py-3 text-xs font-semibold uppercase tracking-wider text-ink-dim transition-colors hover:bg-surface-2 hover:text-ink-mid">
             View Raw Logs ({task.runs.length} run{task.runs.length > 1 ? "s" : ""})
           </summary>
-          <div className="divide-y divide-slate-200 border-t border-slate-200">
+          <div className="divide-y divide-line border-t border-line">
             {[...task.runs].reverse().map((r) => (
               <div key={r.id}>
-                <div className="flex flex-wrap items-center gap-2 bg-slate-100 px-4 py-2 text-xs text-slate-600">
-                  <span className="font-medium">Run #{r.id}</span>
+                <div className="flex flex-wrap items-center gap-2 bg-surface-2 px-5 py-2 text-xs text-ink-mid">
+                  <span className="font-medium text-ink">Run #{r.id}</span>
                   <ModeBadge
                     mode={r.mode}
                     provider={r.llm_provider ?? undefined}
@@ -266,10 +274,10 @@ export default async function TaskDetailPage({
                   <span
                     className={
                       r.status === "failed"
-                        ? "font-medium text-red-600"
+                        ? "font-medium text-red-400"
                         : r.status === "completed"
-                          ? "font-medium text-emerald-600"
-                          : "font-medium text-blue-600"
+                          ? "font-medium text-emerald-400"
+                          : "font-medium text-blue-400"
                     }
                   >
                     {r.status}
@@ -281,11 +289,11 @@ export default async function TaskDetailPage({
                   </span>
                 </div>
                 {r.error && (
-                  <p className="border-b border-red-100 bg-red-50 px-4 py-2 text-xs text-red-700">
+                  <p className="border-b border-red-500/20 bg-red-500/[0.06] px-5 py-2 text-xs text-red-300">
                     {r.error}
                   </p>
                 )}
-                <pre className="max-h-64 overflow-y-auto bg-slate-900 px-4 py-3 text-xs leading-5 text-slate-300">
+                <pre className="max-h-64 overflow-y-auto bg-[#07070c] px-5 py-3 text-xs leading-5 text-ink-mid">
                   {r.log ?? "(no log recorded)"}
                 </pre>
               </div>
