@@ -141,3 +141,52 @@ def test_repo_context_omits_binary(tmp_path):
     context = _repo_context(ws)
     assert "binary file — content omitted" in context
     assert "\x00" not in context
+
+
+async def test_gemini_fallback_mid_loop_causes_no_duplicate_edits(
+    session: AsyncSession, workspace: Workspace
+):
+    """A 503 fallback re-issues only the failed chat call — the conversation
+    (and every edit already made) is preserved, nothing is re-executed."""
+    from app.llm.types import LLMUnavailableError
+
+    provider = FakeProvider(
+        [
+            tool_response(
+                ("write_file", {"path": "calculator.py",
+                                "content": "def divide(a, b):\n    return a / b\n"}),
+            ),
+            LLMUnavailableError("Google Gemini unavailable (503)"),
+            text_response("Done."),
+        ]
+    )
+    provider.name = "google"
+    service_module._instances["google"] = provider
+    spec = ModelSpec("google", "gemini-3.5-flash")
+    service = LLMService(session)
+    runner = LLMRunner(
+        service=service,
+        specs={phase: spec for phase in
+               ("planning", "coding", "review", "summarize", "analysis")},
+    )
+    logs: list[str] = []
+    service.log = logs.append
+    await runner.apply_changes("Add divide", "R", ["step"], workspace, logs.append)
+
+    # The edit happened exactly once.
+    assert workspace.read_file("calculator.py").count("def divide") == 1
+    assert sum("write_file calculator.py" in line for line in logs) == 1
+    # The fallback call replayed the same conversation, not a fresh task:
+    # attempt 2 (failed, Flash) and attempt 3 (Flash Lite) got identical
+    # messages, including the earlier tool result.
+    assert provider.calls[1]["messages"] == provider.calls[2]["messages"]
+    assert provider.calls[2]["model"] == "gemini-3.1-flash-lite"
+    assert any("continued with Gemini 3.1 Flash Lite" in line for line in logs)
+
+    # llm_runs shows what actually ran: Flash ok, Flash failed, Lite ok.
+    runs = (await session.execute(select(LLMRun).order_by(LLMRun.id))).scalars().all()
+    assert [(r.model, r.success) for r in runs] == [
+        ("gemini-3.5-flash", True),
+        ("gemini-3.5-flash", False),
+        ("gemini-3.1-flash-lite", True),
+    ]

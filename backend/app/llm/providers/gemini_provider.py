@@ -7,13 +7,23 @@ import uuid
 
 from app.core.config import settings
 from app.llm.base import BaseLLMProvider
-from app.llm.types import LLMProviderError, LLMResponse, LLMToolCall, Message
+from app.llm.types import (
+    LLMProviderError,
+    LLMResponse,
+    LLMToolCall,
+    LLMUnavailableError,
+    Message,
+)
 
 # Free-tier RPM quotas reset per minute; a couple of paced retries let an
 # agent loop finish instead of dying mid-run.
 MAX_RATE_LIMIT_RETRIES = 2
 DEFAULT_RETRY_DELAY_S = 30.0
 MAX_RETRY_DELAY_S = 65.0
+# 503 (model overloaded / temporarily unavailable): two exponential-backoff
+# retries, then raise LLMUnavailableError so the gateway may fall back.
+MAX_UNAVAILABLE_RETRIES = 2
+UNAVAILABLE_BACKOFF_S = 1.0
 
 
 def _retry_delay_seconds(error_text: str) -> float:
@@ -36,9 +46,10 @@ class GeminiProvider(BaseLLMProvider):
     # gemini-2.5-flash is intentionally absent from the dropdown: it is
     # unavailable to new users. It stays in `pricing` so historical runs
     # keep displaying and estimating correctly.
-    known_models = ["gemini-3.5-flash", "gemini-2.5-pro"]
+    known_models = ["gemini-3.1-flash-lite", "gemini-3.5-flash", "gemini-2.5-pro"]
     # Approximate list prices, USD per MTok (in, out).
     pricing = {
+        "gemini-3.1-flash-lite": (0.30, 1.50),
         "gemini-3.5-flash": (1.50, 9.00),
         "gemini-2.5-flash": (0.30, 2.50),
         "gemini-2.5-pro": (1.25, 10.0),
@@ -175,6 +186,13 @@ class GeminiProvider(BaseLLMProvider):
                 "Google Gemini rate limited (429) — retries exhausted; "
                 "wait a minute and retry the task"
             ) from exc
+        if code == 503:
+            # Transient by definition — the distinct type tells the gateway
+            # a fallback model may retry this exact call.
+            raise LLMUnavailableError(
+                f"Google Gemini unavailable (503) for {model!r} — "
+                f"{MAX_UNAVAILABLE_RETRIES} backoff retries exhausted"
+            ) from exc
         raise LLMProviderError(
             f"Google Gemini API error ({code}): {detail}"
         ) from exc
@@ -215,7 +233,8 @@ class GeminiProvider(BaseLLMProvider):
                 types.Tool(function_declarations=declarations)
             ]
 
-        attempts = 0
+        rate_limit_attempts = 0
+        unavailable_attempts = 0
         while True:
             start = time.monotonic()
             try:
@@ -228,11 +247,18 @@ class GeminiProvider(BaseLLMProvider):
             except genai_errors.APIError as exc:
                 code = getattr(exc, "code", "?")
                 detail = self.scrub(str(getattr(exc, "message", exc)))
-                if code == 429 and attempts < MAX_RATE_LIMIT_RETRIES:
+                if code == 429 and rate_limit_attempts < MAX_RATE_LIMIT_RETRIES:
                     # Free-tier RPM windows reset each minute; honor the
                     # server's suggested delay so agent loops can finish.
-                    attempts += 1
+                    rate_limit_attempts += 1
                     await asyncio.sleep(_retry_delay_seconds(str(exc)))
+                    continue
+                if code == 503 and unavailable_attempts < MAX_UNAVAILABLE_RETRIES:
+                    # Exponential backoff: 1s, 2s.
+                    await asyncio.sleep(
+                        UNAVAILABLE_BACKOFF_S * (2**unavailable_attempts)
+                    )
+                    unavailable_attempts += 1
                     continue
                 await self._raise_readable(code, detail, exc, model, original_model)
             except LLMProviderError:

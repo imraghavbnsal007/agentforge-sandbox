@@ -105,3 +105,126 @@ async def test_usage_endpoint_aggregates(client, session: AsyncSession, project,
         b for b in report["by_project"] if b["key"] == project.name
     )
     assert project_bucket["requests"] == 3
+
+
+# -- Transient-unavailability fallback (Gemini 3.5 Flash -> 3.1 Flash Lite) --
+
+
+async def test_unavailable_gemini_falls_back_to_flash_lite(
+    session: AsyncSession, project, seed_provider
+):
+    from app.llm.types import LLMUnavailableError
+
+    provider = seed_provider(
+        FakeProvider(
+            [
+                LLMUnavailableError("Google Gemini unavailable (503)"),
+                text_response("1. recovered step"),
+            ]
+        ),
+        name="google",
+    )
+    service = LLMService(session, project_id=project.id)
+    logs: list[str] = []
+    service.log = logs.append
+    spec = ModelSpec("google", "gemini-3.5-flash")
+
+    steps = await service.plan(spec, "T", "R", "ctx")
+    assert steps == ["recovered step"]
+
+    # First call used Flash, the retry used Flash Lite.
+    assert [c["model"] for c in provider.calls] == [
+        "gemini-3.5-flash",
+        "gemini-3.1-flash-lite",
+    ]
+    # The task log shows the exact fallback notice.
+    assert logs == [
+        "Gemini 3.5 Flash unavailable; continued with Gemini 3.1 Flash Lite."
+    ]
+
+
+async def test_fallback_records_actual_model_in_llm_runs(
+    session: AsyncSession, project, seed_provider
+):
+    from app.llm.types import LLMUnavailableError
+
+    seed_provider(
+        FakeProvider(
+            [
+                LLMUnavailableError("Google Gemini unavailable (503)"),
+                text_response("1. ok"),
+            ]
+        ),
+        name="google",
+    )
+    service = LLMService(session, project_id=project.id)
+    spec = ModelSpec("google", "gemini-3.5-flash")
+
+    await service.plan(spec, "T", "R", "ctx")
+
+    runs = (await session.execute(select(LLMRun).order_by(LLMRun.id))).scalars().all()
+    assert [(r.model, r.success) for r in runs] == [
+        ("gemini-3.5-flash", False),
+        ("gemini-3.1-flash-lite", True),
+    ]
+    assert all(r.phase == "planning" for r in runs)
+
+
+@pytest.mark.parametrize("message", [
+    "Google Gemini auth/permission error (401)",
+    "Google Gemini auth/permission error (403)",
+    "Google Gemini API error (400): malformed request",
+    "Response blocked by safety settings",
+])
+async def test_no_fallback_for_non_transient_errors(
+    session: AsyncSession, project, seed_provider, message
+):
+    provider = seed_provider(
+        FakeProvider([LLMProviderError(message)]), name="google"
+    )
+    service = LLMService(session, project_id=project.id)
+    logs: list[str] = []
+    service.log = logs.append
+    spec = ModelSpec("google", "gemini-3.5-flash")
+
+    with pytest.raises(LLMProviderError, match=message.split("(")[0].strip()[:20]):
+        await service.plan(spec, "T", "R", "ctx")
+
+    assert len(provider.calls) == 1  # no second attempt
+    assert logs == []
+    runs = (await session.execute(select(LLMRun))).scalars().all()
+    assert len(runs) == 1 and runs[0].success is False
+
+
+async def test_no_fallback_for_models_without_a_mapping(
+    session: AsyncSession, project, seed_provider
+):
+    from app.llm.types import LLMUnavailableError
+
+    provider = seed_provider(
+        FakeProvider([LLMUnavailableError("unavailable (503)")]), name="google"
+    )
+    service = LLMService(session, project_id=project.id)
+    spec = ModelSpec("google", "gemini-3.1-flash-lite")  # already the fallback
+
+    with pytest.raises(LLMUnavailableError):
+        await service.plan(spec, "T", "R", "ctx")
+    assert len(provider.calls) == 1
+
+
+async def test_fallback_applies_to_prefixed_model_ids(
+    session: AsyncSession, project, seed_provider
+):
+    """'google/gemini-3.5-flash' (canonical form) is normalized before the
+    fallback lookup."""
+    from app.llm.types import LLMUnavailableError
+
+    provider = seed_provider(
+        FakeProvider(
+            [LLMUnavailableError("unavailable (503)"), text_response("1. ok")]
+        ),
+        name="google",
+    )
+    service = LLMService(session, project_id=project.id)
+    await service.plan(ModelSpec("google", "google/gemini-3.5-flash"), "T", "R", "c")
+    assert provider.calls[1]["model"] == "gemini-3.1-flash-lite"

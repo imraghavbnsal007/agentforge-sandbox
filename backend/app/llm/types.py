@@ -14,6 +14,14 @@ class LLMProviderError(Exception):
     """
 
 
+class LLMUnavailableError(LLMProviderError):
+    """The provider was temporarily unavailable (e.g. HTTP 503) and retries
+    were exhausted. The request itself was fine — retrying the same call
+    with a fallback model is safe. Auth, malformed-request, and safety
+    errors must NOT use this type.
+    """
+
+
 class AnalysisParseError(LLMProviderError):
     """A repository-analysis response could not be parsed as JSON.
 

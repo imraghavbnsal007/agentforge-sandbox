@@ -102,6 +102,11 @@ class RunService:
         workspace: Workspace | None = None
         try:
             runner = self._runner or self._build_runner(task, project, run)
+            # Fallback notices ("... unavailable; continued with ...") from
+            # the LLM gateway land in this run's log.
+            inner_service = getattr(runner, "service", None)
+            if inner_service is not None and inner_service.log is None:
+                inner_service.log = log
             # Record the mode actually used (an injected runner may differ
             # from the configured AGENT_MODE).
             run.mode = runner.mode

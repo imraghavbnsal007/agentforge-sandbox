@@ -404,3 +404,110 @@ async def test_finish_reason_is_captured_verbatim():
     provider = GeminiProvider(client=client)
     response = await provider.chat("gemini-3.5-flash", [text_message("user", "x")])
     assert response.finish_reason == "MAX_TOKENS"
+
+
+# -- 503 unavailable: exponential-backoff retries, then LLMUnavailableError --
+
+
+def _api_error_503():
+    from google.genai import errors
+
+    return errors.APIError(
+        503,
+        {"error": {"message": "The model is overloaded. Please try again later.",
+                   "status": "UNAVAILABLE"}},
+    )
+
+
+async def test_503_retried_with_exponential_backoff_then_succeeds(monkeypatch):
+    import app.llm.providers.gemini_provider as gp
+
+    sleeps: list[float] = []
+
+    async def fake_sleep(seconds):
+        sleeps.append(seconds)
+
+    monkeypatch.setattr(gp.asyncio, "sleep", fake_sleep)
+    client = _fake_client(
+        [_api_error_503(), _api_error_503(), _api_response(text="recovered")]
+    )
+    provider = GeminiProvider(client=client)
+    response = await provider.chat("gemini-3.5-flash", [text_message("user", "x")])
+
+    assert response.text == "recovered"
+    assert sleeps == [1.0, 2.0]  # exponential backoff
+    assert client.aio.models.generate_content.await_count == 3
+
+
+async def test_503_after_retries_raises_unavailable(monkeypatch):
+    import app.llm.providers.gemini_provider as gp
+
+    from app.llm.types import LLMUnavailableError
+
+    sleeps: list[float] = []
+
+    async def fake_sleep(seconds):
+        sleeps.append(seconds)
+
+    monkeypatch.setattr(gp.asyncio, "sleep", fake_sleep)
+    client = _fake_client([_api_error_503(), _api_error_503(), _api_error_503()])
+    provider = GeminiProvider(client=client)
+
+    with pytest.raises(LLMUnavailableError, match="unavailable \\(503\\)"):
+        await provider.chat("gemini-3.5-flash", [text_message("user", "x")])
+    assert sleeps == [1.0, 2.0]
+
+
+@pytest.mark.parametrize("code,detail", [
+    (400, "invalid request"),
+    (401, "invalid API key"),
+    (403, "permission denied"),
+])
+async def test_auth_and_bad_request_errors_are_never_unavailable(
+    monkeypatch, code, detail
+):
+    import app.llm.providers.gemini_provider as gp
+
+    from google.genai import errors
+
+    from app.llm.types import LLMUnavailableError
+
+    sleeps: list[float] = []
+
+    async def fake_sleep(seconds):
+        sleeps.append(seconds)
+
+    monkeypatch.setattr(gp.asyncio, "sleep", fake_sleep)
+    client = _fake_client(
+        [errors.APIError(code, {"error": {"message": detail, "status": "ERROR"}})]
+    )
+    provider = GeminiProvider(client=client)
+
+    with pytest.raises(LLMProviderError) as excinfo:
+        await provider.chat("gemini-3.5-flash", [text_message("user", "x")])
+    assert not isinstance(excinfo.value, LLMUnavailableError)
+    assert sleeps == []  # no retries for non-transient errors
+    assert client.aio.models.generate_content.await_count == 1
+
+
+async def test_flash_lite_supports_structured_output_and_tools():
+    """Nothing in the provider is model-gated: Flash Lite gets the same
+    json_schema and tool declarations as Flash."""
+    fc = SimpleNamespace(id=None, name="write_file", args={"path": "a.py"})
+    api_response = _api_response(text="", function_calls=[fc])
+    client = _fake_client([api_response])
+    provider = GeminiProvider(client=client)
+    schema = {"type": "object", "properties": {"summary": {"type": "string"}}}
+    response = await provider.chat(
+        "gemini-3.1-flash-lite",
+        [text_message("user", "x")],
+        tools=[{"name": "write_file", "description": "w",
+                "input_schema": {"type": "object", "properties": {}}}],
+        json_schema=schema,
+    )
+    kwargs = client.aio.models.generate_content.await_args.kwargs
+    assert kwargs["model"] == "gemini-3.1-flash-lite"
+    assert kwargs["config"].response_mime_type == "application/json"
+    assert kwargs["config"].response_json_schema == schema
+    assert kwargs["config"].tools[0].function_declarations[0].name == "write_file"
+    assert response.tool_calls[0].name == "write_file"

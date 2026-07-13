@@ -26,7 +26,7 @@ class Settings(BaseSettings):
     ollama_url: str = ""
     # Execution profile building blocks (models are configuration, not code).
     profile_cheap_provider: str = "google"
-    profile_cheap_model: str = "gemini-3.5-flash"
+    profile_cheap_model: str = "gemini-3.1-flash-lite"
     profile_balanced_provider: str = "anthropic"
     profile_balanced_model: str = "claude-sonnet-5"
     profile_premium_provider: str = "anthropic"
