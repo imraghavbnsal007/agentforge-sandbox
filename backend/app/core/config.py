@@ -61,7 +61,18 @@ class Settings(BaseSettings):
     # installation token's job, added in Phase 6B).
     github_app_client_id: str = ""
     github_app_client_secret: str = ""
+    # The App's URL slug, used to build the installation link
+    # (https://github.com/apps/<slug>/installations/new).
     github_app_name: str = ""
+    # Numeric App ID from the GitHub App settings page — the JWT issuer.
+    github_app_id: str = ""
+    # Path to the App's RSA private key. Mounted secret in production, a
+    # gitignored file in development. The contents are never stored in the
+    # database and never logged.
+    github_app_private_key_path: str = ""
+    # Re-mint an installation token this many seconds before GitHub expires
+    # it, so a long clone/push cannot straddle the boundary.
+    installation_token_refresh_margin_seconds: int = 300
     # Where GitHub sends the user back after authorization. Must match the
     # GitHub App's "Callback URL" exactly.
     github_app_callback_url: str = "http://localhost:8000/api/v1/auth/github/callback"
@@ -93,6 +104,10 @@ class Settings(BaseSettings):
 
     def github_oauth_configured(self) -> bool:
         return bool(self.github_app_client_id and self.github_app_client_secret)
+
+    def github_app_configured(self) -> bool:
+        """Whether installation tokens can be minted at all."""
+        return bool(self.github_app_id and self.github_app_private_key_path)
 
 
 settings = Settings()

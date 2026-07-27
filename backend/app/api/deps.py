@@ -1,7 +1,11 @@
-from typing import Annotated, Any
+from typing import TYPE_CHECKING, Annotated, Any
 
 from fastapi import Depends, Request
 from sqlalchemy.ext.asyncio import AsyncSession
+
+if TYPE_CHECKING:
+    from app.services.github_app_token_service import GitHubAppTokenService
+    from app.services.installation_service import InstallationService
 
 from app.core.audit import SESSION_REJECTED, audit
 from app.core.config import settings
@@ -136,6 +140,24 @@ def ensure_owned(obj: Any, user: User) -> Any:
     if owner_id is not None and owner_id != user.id:
         raise NotFoundError("Not found")
     return obj
+
+
+def get_token_service(kv: KV) -> "GitHubAppTokenService":
+    from app.services.github_app_token_service import GitHubAppTokenService
+
+    return GitHubAppTokenService(kv)
+
+
+TokenService = Annotated["GitHubAppTokenService", Depends(get_token_service)]
+
+
+def get_installation_service(session: DbSession) -> "InstallationService":
+    from app.services.installation_service import InstallationService
+
+    return InstallationService(session)
+
+
+Installations = Annotated["InstallationService", Depends(get_installation_service)]
 
 
 def get_project_service(session: DbSession) -> ProjectService:

@@ -12,3 +12,5 @@ pydantic-settings>=2.3
 # Sessions, OAuth state and rate limiting. Already present transitively via
 # arq; declared directly because app code imports it.
 redis>=5.0
+# RS256 signing for GitHub App JWTs; [crypto] pulls in the RSA backend.
+pyjwt[crypto]>=2.8

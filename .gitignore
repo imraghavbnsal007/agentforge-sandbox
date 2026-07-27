@@ -16,3 +16,9 @@ node_modules/
 
 # Database backups (keep the directory, never commit dumps)
 backups/*.sql
+
+# GitHub App private keys — never commit. Mount as a secret in production;
+# keep a local copy here during development.
+*.pem
+secrets/*
+!secrets/.gitkeep
