@@ -12,6 +12,7 @@ from fastapi.responses import RedirectResponse
 from app.api.deps import (
     AuthRateLimiter,
     CurrentSession,
+    DbSession,
     OptionalUser,
     Sessions,
     Users,
@@ -101,14 +102,19 @@ async def github_callback(
     sessions: Sessions,
     users: Users,
     limiter: AuthRateLimiter,
+    db: DbSession,
     code: str = "",
     state: str = "",
     error: str = "",
+    installation_id: str = "",
+    setup_action: str = "",
 ) -> RedirectResponse:
     """Finish sign-in: validate state, exchange the code, create a session.
 
-    The access token obtained here is used once to read the profile and is
-    then discarded — it is never stored or logged.
+    The access token obtained here is used to read the profile and — when the
+    round trip also carried a GitHub App installation — to verify that the
+    installation really belongs to this user. It is discarded immediately
+    afterwards and is never stored, logged, or reused for repository access.
     """
     ip = client_ip(request)
     await limiter.check("auth_callback", ip)
@@ -119,8 +125,8 @@ async def github_callback(
 
     # State is validated before the code is touched, and burned on read so a
     # replayed callback cannot mint a second session.
-    redirect_to = await _state_store(request.app.state.kv).consume(state)
-    if redirect_to is None:
+    oauth_state = await _state_store(request.app.state.kv).consume(state)
+    if oauth_state is None:
         audit(LOGIN_FAILED, reason="invalid_state", ip=ip)
         raise InvalidInputError(
             "Sign-in link is invalid or has expired — please try again."
@@ -129,29 +135,74 @@ async def github_callback(
         audit(LOGIN_FAILED, reason="missing_code", ip=ip)
         raise InvalidInputError("GitHub did not return an authorization code.")
 
+    # GitHub appends installation_id when the App was installed as part of
+    # this authorization; the state carries it when we started the round trip
+    # ourselves from the setup URL.
+    pending_installation = _coerce_installation_id(installation_id) or (
+        oauth_state.installation_id
+    )
+
     client = _oauth_client_factory()
+    redirect_to = oauth_state.redirect_to
     try:
         access_token = await client.exchange_code(code)
         profile = await client.fetch_profile(access_token)
+
+        user = await users.upsert_from_github(profile)
+        session = await sessions.create(user.id, user.github_login)
+        audit(LOGIN_SUCCEEDED, user_id=user.id, github_login=user.github_login, ip=ip)
+
+        if pending_installation is not None:
+            redirect_to = await _link_installation(
+                db, user, pending_installation, access_token, redirect_to
+            )
     except OAuthError as exc:
         audit(LOGIN_FAILED, reason="oauth_failed", detail=str(exc), ip=ip)
         raise InvalidInputError(str(exc)) from exc
     finally:
-        # Identity only. Nothing downstream may reuse this token.
+        # Identity only. Nothing downstream may reuse this token, and it is
+        # never written anywhere.
         access_token = ""
-
-    user = await users.upsert_from_github(profile)
-    session = await sessions.create(user.id, user.github_login)
-    audit(
-        LOGIN_SUCCEEDED,
-        user_id=user.id,
-        github_login=user.github_login,
-        ip=ip,
-    )
 
     response = RedirectResponse(_safe_redirect(redirect_to), status_code=303)
     set_session_cookies(response, session.session_id, session.csrf_token)
     return response
+
+
+def _coerce_installation_id(raw: str) -> int | None:
+    try:
+        value = int(raw)
+    except (TypeError, ValueError):
+        return None
+    return value if value > 0 else None
+
+
+async def _link_installation(
+    db, user, github_installation_id: int, access_token: str, redirect_to: str
+) -> str:
+    """Verify and record an installation using the just-issued user token.
+
+    A failure here must not sink an otherwise valid sign-in: the user is
+    signed in either way and sent somewhere that explains the problem.
+    """
+    from app.services.installation_service import (
+        InstallationAccessError,
+        InstallationService,
+    )
+
+    try:
+        await InstallationService(db).link_installation_for_user(
+            user, github_installation_id, access_token
+        )
+    except InstallationAccessError:
+        return "/settings/installations?error=not_available"
+    except Exception:
+        logger.exception(
+            "Installation %s could not be linked after sign-in",
+            github_installation_id,
+        )
+        return "/settings/installations?error=verification_failed"
+    return redirect_to if redirect_to != "/" else "/settings/installations"
 
 
 @router.post("/logout", status_code=204)

@@ -46,25 +46,38 @@ def _state_key(state: str) -> str:
     return f"{OAUTH_STATE_KEY_PREFIX}{state}"
 
 
+@dataclass
+class OAuthState:
+    """What a validated state token carries back from the round trip."""
+
+    redirect_to: str = "/"
+    # Set when the round trip was started to verify a GitHub App
+    # installation, so the callback knows to link it afterwards.
+    installation_id: int | None = None
+
+
 class OAuthStateStore:
     """Single-use, short-lived CSRF state for the OAuth round trip."""
 
     def __init__(self, kv) -> None:
         self._kv = kv
 
-    async def issue(self, redirect_to: str = "/") -> str:
+    async def issue(
+        self, redirect_to: str = "/", installation_id: int | None = None
+    ) -> str:
         state = secrets.token_urlsafe(STATE_BYTES)
         payload = json.dumps(
             {
                 "redirect_to": redirect_to,
+                "installation_id": installation_id,
                 "created_at": datetime.now(timezone.utc).isoformat(),
             }
         )
         await self._kv.set(_state_key(state), payload, OAUTH_STATE_TTL_SECONDS)
         return state
 
-    async def consume(self, state: str) -> str | None:
-        """Validate and burn the state. Returns the redirect target, or None
+    async def consume(self, state: str) -> OAuthState | None:
+        """Validate and burn the state. Returns the carried values, or None
         when the state is unknown, already used, or expired."""
         if not state:
             return None
@@ -72,9 +85,14 @@ class OAuthStateStore:
         if raw is None:
             return None
         try:
-            return str(json.loads(raw).get("redirect_to") or "/")
+            payload = json.loads(raw)
         except ValueError:
-            return "/"
+            return OAuthState()
+        installation_id = payload.get("installation_id")
+        return OAuthState(
+            redirect_to=str(payload.get("redirect_to") or "/"),
+            installation_id=int(installation_id) if installation_id else None,
+        )
 
 
 def authorize_url(state: str) -> str:

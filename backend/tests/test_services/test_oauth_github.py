@@ -52,9 +52,24 @@ def test_authorize_url_never_leaks_the_client_secret():
 async def test_state_is_single_use(kv: InMemoryKVStore):
     store = OAuthStateStore(kv)
     state = await store.issue("/projects")
-    assert await store.consume(state) == "/projects"
+    consumed = await store.consume(state)
+    assert consumed is not None and consumed.redirect_to == "/projects"
     # Second attempt (a replayed callback) finds nothing.
     assert await store.consume(state) is None
+
+
+async def test_state_carries_an_installation_id_when_given(kv: InMemoryKVStore):
+    """The setup-URL flow rides the installation id in the single-use state
+    rather than trusting it from the browser on the way back."""
+    store = OAuthStateStore(kv)
+    consumed = await store.consume(await store.issue("/", installation_id=500))
+    assert consumed is not None and consumed.installation_id == 500
+
+
+async def test_state_without_an_installation_id_carries_none(kv: InMemoryKVStore):
+    store = OAuthStateStore(kv)
+    consumed = await store.consume(await store.issue("/"))
+    assert consumed is not None and consumed.installation_id is None
 
 
 async def test_unknown_state_is_rejected(kv: InMemoryKVStore):
@@ -67,7 +82,8 @@ async def test_empty_state_is_rejected(kv: InMemoryKVStore):
 
 async def test_state_defaults_to_root_redirect(kv: InMemoryKVStore):
     store = OAuthStateStore(kv)
-    assert await store.consume(await store.issue()) == "/"
+    consumed = await store.consume(await store.issue())
+    assert consumed is not None and consumed.redirect_to == "/"
 
 
 async def test_issued_states_are_unique(kv: InMemoryKVStore):

@@ -8,7 +8,16 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
 from app.api.deps import require_user
-from app.api.routes import auth, health, llm, meta, projects, tasks, usage
+from app.api.routes import (
+    auth,
+    github_app,
+    health,
+    llm,
+    meta,
+    projects,
+    tasks,
+    usage,
+)
 from app.core.audit import CSRF_REJECTED, RATE_LIMITED, audit
 from app.core.config import settings
 from app.core.exceptions import (
@@ -148,6 +157,7 @@ def create_app(with_lifespan: bool = True) -> FastAPI:
     # require_user always resolves the default local user, so these behave
     # exactly as they did before Phase 6A.
     protected = [Depends(require_user)]
+    app.include_router(github_app.router, dependencies=protected)
     app.include_router(llm.router, dependencies=protected)
     app.include_router(projects.router, dependencies=protected)
     app.include_router(tasks.router, dependencies=protected)
