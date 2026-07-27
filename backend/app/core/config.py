@@ -2,7 +2,7 @@ from pathlib import Path
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
-from app.core.enums import AgentMode
+from app.core.enums import AgentMode, AuthMode
 
 # Repo root when running outside Docker (backend/app/core/config.py -> repo root)
 _REPO_ROOT = Path(__file__).resolve().parents[3]
@@ -49,6 +49,50 @@ class Settings(BaseSettings):
     # Seconds the mock runner pauses between pipeline steps so status
     # transitions are observable in the UI. Tests set this to 0.
     agent_step_delay: float = 1.5
+
+    # --- Authentication (Phase 6A) ----------------------------------------
+    # local      -> no sign-in; every request resolves to the default local
+    #               user, preserving the single-user PAT workflow.
+    # github_app -> GitHub sign-in required; unauthenticated callers get 401.
+    auth_mode: AuthMode = AuthMode.local
+
+    # GitHub App OAuth credentials — used only to identify the user. They are
+    # never used to clone, push, or open pull requests (that is the
+    # installation token's job, added in Phase 6B).
+    github_app_client_id: str = ""
+    github_app_client_secret: str = ""
+    github_app_name: str = ""
+    # Where GitHub sends the user back after authorization. Must match the
+    # GitHub App's "Callback URL" exactly.
+    github_app_callback_url: str = "http://localhost:8000/api/v1/auth/github/callback"
+    # Where the backend sends the browser once a session exists.
+    frontend_url: str = "http://localhost:3000"
+
+    session_cookie_name: str = "agentforge_session"
+    csrf_cookie_name: str = "agentforge_csrf"
+    # Secure=true requires HTTPS; keep false for local http:// development.
+    cookie_secure: bool = False
+    session_ttl_seconds: int = 7 * 24 * 3600
+
+    # Comma-separated browser origins allowed to send credentialed requests.
+    # A wildcard is rejected at startup: "*" plus credentials is never valid.
+    cors_origins: str = "http://localhost:3000"
+
+    # Trust X-Forwarded-For for the client IP. Enable only when running
+    # behind a reverse proxy that overwrites the header.
+    trust_proxy_headers: bool = False
+    # Fixed-window rate limits for the sign-in routes.
+    auth_rate_limit_requests: int = 10
+    auth_rate_limit_window_seconds: int = 300
+
+    def cors_origin_list(self) -> list[str]:
+        return [o.strip() for o in self.cors_origins.split(",") if o.strip()]
+
+    def is_github_app_mode(self) -> bool:
+        return self.auth_mode == AuthMode.github_app
+
+    def github_oauth_configured(self) -> bool:
+        return bool(self.github_app_client_id and self.github_app_client_secret)
 
 
 settings = Settings()

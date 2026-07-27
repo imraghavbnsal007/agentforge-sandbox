@@ -9,3 +9,6 @@ google-genai>=1.16
 httpx>=0.27
 pydantic>=2.7
 pydantic-settings>=2.3
+# Sessions, OAuth state and rate limiting. Already present transitively via
+# arq; declared directly because app code imports it.
+redis>=5.0

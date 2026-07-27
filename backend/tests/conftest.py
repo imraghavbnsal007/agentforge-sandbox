@@ -6,10 +6,13 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_asyn
 from sqlalchemy.pool import StaticPool
 
 from app.api.deps import get_queue
+from app.core.security import CSRF_HEADER
 from app.db.base import Base
 from app.db.session import get_db
 from app.main import create_app
-from app.models import Project, Task
+from app.models import Project, Task, User
+from app.services.kv_store import InMemoryKVStore
+from app.services.session_store import SessionStore
 
 
 @pytest.fixture(autouse=True)
@@ -17,10 +20,14 @@ def _neutral_github_settings(monkeypatch: pytest.MonkeyPatch):
     """Isolate tests from the host/container's real GitHub configuration.
 
     Tests that need an allowlist or token set their own via monkeypatch.
+    Auth defaults to local mode — the same default the product ships — so
+    every pre-Phase-6A test keeps exercising unauthenticated routes.
     """
     from app.core.config import settings
+    from app.core.enums import AuthMode
 
     monkeypatch.setattr(settings, "github_allowed_repos", "")
+    monkeypatch.setattr(settings, "auth_mode", AuthMode.local)
     yield
 
 
@@ -63,15 +70,45 @@ def fake_queue() -> FakeQueue:
 
 
 @pytest.fixture
+def kv() -> InMemoryKVStore:
+    """Session/OAuth-state/rate-limit backing store for one test."""
+    return InMemoryKVStore()
+
+
+@pytest.fixture
 async def client(
-    session: AsyncSession, fake_queue: FakeQueue
+    session: AsyncSession, fake_queue: FakeQueue, kv: InMemoryKVStore
 ) -> AsyncIterator[AsyncClient]:
     app = create_app(with_lifespan=False)
+    app.state.kv = kv
     app.dependency_overrides[get_db] = lambda: session
     app.dependency_overrides[get_queue] = lambda: fake_queue
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as client:
         yield client
+
+
+@pytest.fixture
+async def signed_in(
+    client: AsyncClient, session: AsyncSession, kv: InMemoryKVStore
+) -> tuple[AsyncClient, User]:
+    """A client holding a real session cookie for a real user row.
+
+    Used by github_app-mode tests; builds the session through SessionStore so
+    the cookie/CSRF pairing matches production exactly.
+    """
+    from app.core.config import settings
+
+    user = User(github_user_id=4242, github_login="octocat", display_name="Octocat")
+    session.add(user)
+    await session.commit()
+    await session.refresh(user)
+
+    store = SessionStore(kv, ttl_seconds=settings.session_ttl_seconds)
+    data = await store.create(user.id, user.github_login)
+    client.cookies.set(settings.session_cookie_name, data.session_id)
+    client.headers[CSRF_HEADER] = data.csrf_token
+    return client, user
 
 
 @pytest.fixture

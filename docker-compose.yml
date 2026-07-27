@@ -38,6 +38,19 @@ services:
       SAMPLE_REPO_PATH: /sample_repo
       GITHUB_TOKEN: ${GITHUB_TOKEN:-}
       GITHUB_ALLOWED_REPOS: ${GITHUB_ALLOWED_REPOS:-}
+      # --- Authentication (Phase 6A) ---
+      # "local" keeps the single-user PAT workflow; "github_app" requires
+      # GitHub sign-in.
+      AUTH_MODE: ${AUTH_MODE:-local}
+      GITHUB_APP_CLIENT_ID: ${GITHUB_APP_CLIENT_ID:-}
+      GITHUB_APP_CLIENT_SECRET: ${GITHUB_APP_CLIENT_SECRET:-}
+      GITHUB_APP_NAME: ${GITHUB_APP_NAME:-}
+      GITHUB_APP_CALLBACK_URL: ${GITHUB_APP_CALLBACK_URL:-http://localhost:8000/api/v1/auth/github/callback}
+      FRONTEND_URL: ${FRONTEND_URL:-http://localhost:3000}
+      CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:3000}
+      # Secure cookies require HTTPS — enable in production only.
+      COOKIE_SECURE: ${COOKIE_SECURE:-false}
+      TRUST_PROXY_HEADERS: ${TRUST_PROXY_HEADERS:-false}
     command: sh -c "alembic upgrade head && uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload"
     ports:
       - "8000:8000"

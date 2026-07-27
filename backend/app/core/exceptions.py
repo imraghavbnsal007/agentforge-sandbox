@@ -12,3 +12,11 @@ class InvalidInputError(Exception):
 
 class ForbiddenError(Exception):
     """Action refused by policy (e.g. repo allowlist). Mapped to HTTP 403."""
+
+
+class UnauthorizedError(Exception):
+    """No valid session for a route that requires one. Mapped to HTTP 401."""
+
+
+class RateLimitedError(Exception):
+    """Caller exceeded a rate limit. Mapped to HTTP 429."""

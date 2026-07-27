@@ -30,6 +30,19 @@ class AgentMode(StrEnum):
     llm = "llm"
 
 
+class AuthMode(StrEnum):
+    """How AgentForge identifies the caller.
+
+    local      — single-user development: every request resolves to the
+                 default local user, no sign-in, PAT + allowlist repo access.
+    github_app — public multi-user: GitHub sign-in for identity, GitHub App
+                 installations for repository authorisation.
+    """
+
+    local = "local"
+    github_app = "github_app"
+
+
 class AnalysisStatus(StrEnum):
     pending = "pending"
     running = "running"

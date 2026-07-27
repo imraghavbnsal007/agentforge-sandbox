@@ -248,12 +248,66 @@ export interface TaskDetail extends Task {
   runs: AgentRun[];
 }
 
+/** Thrown when the API rejects a request for lack of a session. */
+export class UnauthenticatedError extends Error {
+  constructor(path: string) {
+    super(`Not authenticated: ${path}`);
+    this.name = "UnauthenticatedError";
+  }
+}
+
+/**
+ * Server-side read. Forwards the caller's cookies so the backend sees the
+ * same session the browser has — without this every server component would
+ * look anonymous to the API.
+ */
 async function get<T>(path: string): Promise<T> {
-  const res = await fetch(`${API_URL}${path}`, { cache: "no-store" });
+  const { cookies } = await import("next/headers");
+  const cookieHeader = (await cookies()).toString();
+  const res = await fetch(`${API_URL}${path}`, {
+    cache: "no-store",
+    headers: cookieHeader ? { cookie: cookieHeader } : undefined,
+  });
+  if (res.status === 401) {
+    throw new UnauthenticatedError(path);
+  }
   if (!res.ok) {
     throw new Error(`API request failed: ${res.status} ${path}`);
   }
   return res.json();
+}
+
+/** Read the CSRF token the backend mirrored into a readable cookie. */
+function csrfToken(): string {
+  if (typeof document === "undefined") return "";
+  const match = document.cookie.match(/(?:^|;\s*)agentforge_csrf=([^;]*)/);
+  return match ? decodeURIComponent(match[1]) : "";
+}
+
+/**
+ * Browser-side write. Sends the session cookie and echoes the CSRF token,
+ * which the backend requires on every cookie-authenticated mutation.
+ */
+async function mutate<T>(
+  path: string,
+  init: { method: string; body?: unknown },
+): Promise<T> {
+  const token = csrfToken();
+  const headers: Record<string, string> = {};
+  if (init.body !== undefined) headers["Content-Type"] = "application/json";
+  if (token) headers["X-CSRF-Token"] = token;
+
+  const res = await fetch(`${PUBLIC_API_URL}${path}`, {
+    method: init.method,
+    credentials: "include",
+    headers,
+    body: init.body === undefined ? undefined : JSON.stringify(init.body),
+  });
+  if (!res.ok) {
+    const body = await res.json().catch(() => null);
+    throw new Error(body?.detail ?? `Request failed with ${res.status}`);
+  }
+  return res.status === 204 ? (undefined as T) : res.json();
 }
 
 export function getTasks(): Promise<Task[]> {
@@ -277,43 +331,28 @@ export function getProject(id: string | number): Promise<ProjectDetail> {
 }
 
 /** Browser-side: register a GitHub repo as a project (validation only, no analysis). */
-export async function registerProject(input: {
+export function registerProject(input: {
   repo_url: string;
   default_branch: string;
 }): Promise<Project> {
-  const res = await fetch(`${PUBLIC_API_URL}/api/v1/projects/register`, {
+  return mutate<Project>("/api/v1/projects/register", {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(input),
+    body: input,
   });
-  if (!res.ok) {
-    const body = await res.json().catch(() => null);
-    throw new Error(body?.detail ?? `Registration failed with ${res.status}`);
-  }
-  return res.json();
 }
 
 /** Browser-side: enqueue a repository analysis. */
-export async function analyzeProject(id: number): Promise<Analysis> {
-  const res = await fetch(`${PUBLIC_API_URL}/api/v1/projects/${id}/analyze`, {
-    method: "POST",
-  });
-  if (!res.ok) {
-    const body = await res.json().catch(() => null);
-    throw new Error(body?.detail ?? `Analyze failed with ${res.status}`);
-  }
-  return res.json();
+export function analyzeProject(id: number): Promise<Analysis> {
+  return mutate<Analysis>(`/api/v1/projects/${id}/analyze`, { method: "POST" });
 }
 
-async function postAction(id: number, action: string): Promise<Task> {
-  const res = await fetch(`${PUBLIC_API_URL}/api/v1/tasks/${id}/${action}`, {
-    method: "POST",
-  });
-  if (!res.ok) {
-    const body = await res.json().catch(() => null);
-    throw new Error(body?.detail ?? `${action} failed with ${res.status}`);
-  }
-  return res.json();
+function postAction(id: number, action: string): Promise<Task> {
+  return mutate<Task>(`/api/v1/tasks/${id}/${action}`, { method: "POST" });
+}
+
+/** Browser-side: end the current session. */
+export function logout(): Promise<void> {
+  return mutate<void>("/api/v1/auth/logout", { method: "POST" });
 }
 
 /** Browser-side: re-enqueue an agent run for an existing task. */
@@ -332,7 +371,7 @@ export function getUsage(): Promise<UsageReport> {
 }
 
 /** Browser-side: save a project's preferred LLM settings. */
-export async function updateProjectSettings(
+export function updateProjectSettings(
   id: number,
   input: {
     preferred_provider: string | null;
@@ -340,20 +379,14 @@ export async function updateProjectSettings(
     preferred_execution_profile: string | null;
   },
 ): Promise<Project> {
-  const res = await fetch(`${PUBLIC_API_URL}/api/v1/projects/${id}/settings`, {
+  return mutate<Project>(`/api/v1/projects/${id}/settings`, {
     method: "PATCH",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(input),
+    body: input,
   });
-  if (!res.ok) {
-    const body = await res.json().catch(() => null);
-    throw new Error(body?.detail ?? `Save failed with ${res.status}`);
-  }
-  return res.json();
 }
 
 /** Browser-side: create a task and enqueue its agent run. */
-export async function createTask(input: {
+export function createTask(input: {
   project_id: number;
   title: string;
   request: string;
@@ -361,14 +394,5 @@ export async function createTask(input: {
   llm_model?: string | null;
   execution_profile?: string | null;
 }): Promise<Task> {
-  const res = await fetch(`${PUBLIC_API_URL}/api/v1/tasks`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(input),
-  });
-  if (!res.ok) {
-    const body = await res.json().catch(() => null);
-    throw new Error(body?.detail ?? `Request failed with ${res.status}`);
-  }
-  return res.json();
+  return mutate<Task>("/api/v1/tasks", { method: "POST", body: input });
 }

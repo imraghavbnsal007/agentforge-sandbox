@@ -7,6 +7,7 @@ from app.models.repo_file_summary import RepoFileSummary
 from app.models.repo_improvement_suggestion import RepoImprovementSuggestion
 from app.models.task import Task
 from app.models.test_result import TestResult
+from app.models.user import User
 
 __all__ = [
     "AgentRun",
@@ -18,4 +19,5 @@ __all__ = [
     "RepoImprovementSuggestion",
     "Task",
     "TestResult",
+    "User",
 ]

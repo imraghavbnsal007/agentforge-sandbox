@@ -14,6 +14,8 @@ import {
   IconX,
   Logo,
 } from "@/components/ui/Icons";
+import { UserMenu } from "@/components/UserMenu";
+import type { SessionUser } from "@/lib/session";
 
 const COLLAPSE_KEY = "agentforge-sidebar-collapsed";
 
@@ -77,7 +79,7 @@ function NavLinks({
   );
 }
 
-export function Sidebar() {
+export function Sidebar({ user }: { user: SessionUser | null }) {
   const pathname = usePathname();
   const [collapsed, setCollapsed] = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
@@ -123,6 +125,8 @@ export function Sidebar() {
         </div>
 
         <NavLinks pathname={pathname} collapsed={collapsed} />
+
+        {user && <UserMenu user={user} collapsed={collapsed} />}
 
         <div className={`px-2 pb-4 ${collapsed ? "flex justify-center px-0" : ""}`}>
           <button
@@ -198,6 +202,7 @@ export function Sidebar() {
                 collapsed={false}
                 onNavigate={() => setMobileOpen(false)}
               />
+              {user && <UserMenu user={user} />}
             </motion.aside>
           </>
         )}

@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import { ChunkGuard } from "@/components/ChunkGuard";
 import { Providers } from "@/components/Providers";
 import { Sidebar } from "@/components/Sidebar";
+import { getAuthStatus } from "@/lib/session";
 import "./globals.css";
 
 export const metadata: Metadata = {
@@ -9,9 +10,11 @@ export const metadata: Metadata = {
   description: "AI engineering assistant for feature requests",
 };
 
-export default function RootLayout({
+export default async function RootLayout({
   children,
 }: Readonly<{ children: React.ReactNode }>) {
+  const auth = await getAuthStatus();
+
   return (
     <html lang="en">
       <body className="min-h-screen bg-surface-0 font-sans text-ink antialiased">
@@ -24,7 +27,9 @@ export default function RootLayout({
             Skip to content
           </a>
           <div className="flex min-h-screen flex-col md:flex-row">
-            <Sidebar />
+            {/* Signed-out visitors get the bare landing shell — no navigation
+                into data they cannot read. */}
+            {auth.authenticated && <Sidebar user={auth.user} />}
             <main
               id="main-content"
               className="mx-auto w-full max-w-6xl flex-1 px-4 py-6 sm:px-8 sm:py-10"
