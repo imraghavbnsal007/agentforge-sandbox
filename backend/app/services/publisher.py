@@ -148,7 +148,11 @@ class PublishService:
     async def publish_task(self, task_id: int) -> None:
         from app.repositories.task_repo import TaskRepository
 
-        task = await TaskRepository(self.session).get_with_runs(task_id)
+        # Worker context: no request user. Ownership is re-derived from the
+        # project row rather than trusted from the job payload.
+        task = await TaskRepository(self.session).get_with_runs_unscoped_for_worker(
+            task_id
+        )
         if task is None:
             raise NotFoundError(f"Task {task_id} not found")
         if task.status != TaskStatus.publishing:

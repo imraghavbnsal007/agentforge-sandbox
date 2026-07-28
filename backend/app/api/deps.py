@@ -6,6 +6,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 if TYPE_CHECKING:
     from app.services.github_app_token_service import GitHubAppTokenService
     from app.services.installation_service import InstallationService
+    from app.services.repository_discovery import RepositoryDiscoveryService
 
 from app.core.audit import SESSION_REJECTED, audit
 from app.core.config import settings
@@ -160,9 +161,26 @@ def get_installation_service(session: DbSession) -> "InstallationService":
 Installations = Annotated["InstallationService", Depends(get_installation_service)]
 
 
-def get_project_service(session: DbSession) -> ProjectService:
-    return ProjectService(session)
+def get_project_service(session: DbSession, user: CurrentUser) -> ProjectService:
+    return ProjectService(session, user)
 
 
-def get_task_service(session: DbSession, queue: Queue) -> TaskService:
-    return TaskService(session, queue)
+def get_task_service(
+    session: DbSession, queue: Queue, user: CurrentUser
+) -> TaskService:
+    return TaskService(session, queue, user)
+
+
+def get_discovery_service(
+    session: DbSession, token_service: TokenService
+) -> "RepositoryDiscoveryService":
+    from app.services.repository_discovery import RepositoryDiscoveryService
+
+    return RepositoryDiscoveryService(session, token_service)
+
+
+Discovery = Annotated[
+    "RepositoryDiscoveryService", Depends(get_discovery_service)
+]
+Service = Annotated[ProjectService, Depends(get_project_service)]
+Tasks = Annotated[TaskService, Depends(get_task_service)]

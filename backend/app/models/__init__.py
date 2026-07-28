@@ -1,6 +1,7 @@
 from app.models.agent_run import AgentRun
 from app.models.file_change import FileChange
 from app.models.github_installation import GitHubInstallation
+from app.models.github_installation_repository import GitHubInstallationRepository
 from app.models.llm_run import LLMRun
 from app.models.project import Project
 from app.models.project_analysis import ProjectAnalysis
@@ -15,6 +16,7 @@ __all__ = [
     "AgentRun",
     "FileChange",
     "GitHubInstallation",
+    "GitHubInstallationRepository",
     "LLMRun",
     "Project",
     "ProjectAnalysis",

@@ -87,7 +87,10 @@ class ParseFailingAnalyst:
 
 
 async def _make_analysis(session: AsyncSession) -> int:
+    from tests.helpers import local_user_id
+
     project = Project(
+        user_id=await local_user_id(session),
         name="acme/widget",
         repo_path="",
         repo_url="https://github.com/acme/widget.git",

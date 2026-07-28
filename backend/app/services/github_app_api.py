@@ -56,6 +56,20 @@ class InstallationInfo:
 
 
 @dataclass
+class RepositoryInfo:
+    """A repository an installation grants access to."""
+
+    github_repository_id: int
+    owner: str
+    name: str
+    full_name: str
+    default_branch: str
+    private: bool = False
+    archived: bool = False
+    disabled: bool = False
+
+
+@dataclass
 class InstallationToken:
     """A short-lived installation access token. Never persisted to Postgres,
     never returned to the frontend."""
@@ -95,6 +109,25 @@ def parse_installation(payload: dict) -> InstallationInfo:
         repository_selection=str(payload.get("repository_selection") or "selected"),
         suspended_at=_parse_timestamp(payload.get("suspended_at")),
         permissions=payload.get("permissions") or {},
+    )
+
+
+def parse_repository(payload: dict) -> RepositoryInfo:
+    full_name = str(payload.get("full_name") or "")
+    owner = str((payload.get("owner") or {}).get("login") or "")
+    name = str(payload.get("name") or "")
+    if full_name and not (owner and name):
+        # Defensive: derive the parts when only full_name came back.
+        owner, _, name = full_name.partition("/")
+    return RepositoryInfo(
+        github_repository_id=int(payload["id"]),
+        owner=owner,
+        name=name,
+        full_name=full_name or f"{owner}/{name}",
+        default_branch=str(payload.get("default_branch") or "main"),
+        private=bool(payload.get("private")),
+        archived=bool(payload.get("archived")),
+        disabled=bool(payload.get("disabled")),
     )
 
 
@@ -203,6 +236,48 @@ class GitHubAppAPI:
             permissions=payload.get("permissions") or {},
             repository_selection=str(payload.get("repository_selection") or ""),
         )
+
+    async def list_installation_repositories(
+        self, installation_token: str
+    ) -> list[RepositoryInfo]:
+        """Every repository the installation currently grants.
+
+        Authenticated with the *installation* token, so the result is exactly
+        what the App may touch — no broader, no narrower.
+        """
+        repositories: list[RepositoryInfo] = []
+        page = 1
+        while True:
+            response = await self._request(
+                "GET",
+                f"{GITHUB_API}/installation/repositories"
+                f"?per_page=100&page={page}",
+                installation_token,
+            )
+            if response.status_code == 401:
+                raise GitHubAppAPIError(
+                    "GitHub rejected the installation token while listing "
+                    "repositories (401)."
+                )
+            if response.status_code == 403:
+                raise GitHubAppAPIError(
+                    "The installation is suspended or forbidden (403)."
+                )
+            if response.status_code != 200:
+                raise GitHubAppAPIError(
+                    f"Could not list installation repositories "
+                    f"({response.status_code})"
+                )
+            payload = response.json()
+            batch = payload.get("repositories") or []
+            repositories.extend(parse_repository(item) for item in batch)
+            # Stop on a short page; GitHub caps per_page at 100.
+            if len(batch) < 100:
+                break
+            page += 1
+            if page > 20:  # 2000 repositories is well past any real use
+                break
+        return repositories
 
     async def list_user_installations(
         self, user_access_token: str

@@ -90,8 +90,10 @@ async def test_github_project_goes_ready_for_review(
     session: AsyncSession, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     from app.models import Project
+    from tests.helpers import local_user_id
 
     project = Project(
+        user_id=await local_user_id(session),
         name="GH",
         repo_url="https://github.com/acme/widget.git",
         github_owner="acme",
@@ -142,8 +144,10 @@ async def test_analyzed_project_uses_detected_test_command_and_no_tests_path(
     from app.core.config import settings
     from app.core.enums import AnalysisStatus
     from app.models import Project, ProjectAnalysis
+    from tests.helpers import local_user_id
 
     project = Project(
+        user_id=await local_user_id(session),
         name="GH2",
         repo_url="https://github.com/acme/w2.git",
         github_owner="acme",
