@@ -22,22 +22,61 @@ from app.llm.service import LLMService
 from app.models import AgentRun, FileChange, Project, Task, TestResult
 from app.services.git_client import GitClient
 from app.services.github_config import is_github_project, validate_github_project
+from app.services.github_credentials import RepoOperation
 
 logger = logging.getLogger(__name__)
 
 WorkspaceFactory = Callable[[Project], Awaitable[Workspace]]
 
 
-async def create_workspace_for(project: Project) -> Workspace:
-    """Sample-repo copy, or a shallow clone for GitHub-configured projects."""
+async def create_workspace_for(
+    project: Project, session=None
+) -> Workspace:
+    """Sample-repo copy, or a shallow clone for GitHub-configured projects.
+
+    In github_app mode the clone credential is resolved from the project's
+    installation — validated for ownership, installation state and repository
+    grant — and discarded once the clone completes.
+    """
     if not is_github_project(project):
         return Workspace.create_from(settings.sample_repo_path)
-    # Fails clearly here (before any agent work) if config or token is missing.
+    # Fails clearly here (before any agent work) if config is missing.
     validate_github_project(project)
+
+    git = await build_git_client(project, session, RepoOperation.clone)
     clone_dir = Path(tempfile.mkdtemp(prefix="agentforge-ws-"))
-    git = GitClient(token=settings.github_token)
     await git.clone(project.repo_url, clone_dir, project.default_branch)
     return Workspace.from_dir(clone_dir)
+
+
+async def build_git_client(
+    project: Project, session, operation: "RepoOperation"
+) -> GitClient:
+    """A git client carrying freshly resolved credentials for one operation."""
+    if session is None:
+        # No session (older injected call sites): local mode only.
+        return GitClient(
+            token=settings.github_token,
+            committer_name=settings.local_commit_name,
+            committer_email=settings.local_commit_email,
+        )
+    from app.services.github_app_token_service import GitHubAppTokenService
+    from app.services.github_credentials import GitHubCredentialResolver
+    from app.services.kv_store import get_shared_kv
+
+    token_service = (
+        GitHubAppTokenService(get_shared_kv())
+        if settings.is_github_app_mode()
+        else None
+    )
+    credentials = await GitHubCredentialResolver(session, token_service).resolve(
+        project.id, operation, user_id=project.user_id
+    )
+    return GitClient(
+        token=credentials.token,
+        committer_name=credentials.committer_name,
+        committer_email=credentials.committer_email,
+    )
 
 
 class RunService:
@@ -58,7 +97,9 @@ class RunService:
         self.session = session
         self._runner = runner
         self._executor = executor
-        self._workspace_factory = workspace_factory or create_workspace_for
+        self._workspace_factory = workspace_factory or (
+            lambda project: create_workspace_for(project, session)
+        )
 
     async def _resolve_executor(self, project: Project) -> TestExecutor | None:
         """Pick the test executor; None means 'honestly skip tests'."""

@@ -214,7 +214,22 @@ class AnalysisService:
         clone_dir: Path | None = None
         try:
             validate_github_project(project)
-            git = self._git or GitClient(token=settings.github_token)
+            # Ownership for the clone credential is derived analysis -> project
+            # -> user_id; nothing is taken from the job payload.
+            if self._git is not None:
+                git = self._git
+            else:
+                from app.services.github_credentials import RepoOperation
+                from app.services.run_service import build_git_client
+
+                git = await build_git_client(
+                    project, self.session, RepoOperation.clone
+                )
+                if settings.is_github_app_mode():
+                    log(
+                        "credential: GitHub App installation token "
+                        f"(project owner {project.user_id})"
+                    )
             clone_dir = Path(tempfile.mkdtemp(prefix="agentforge-analysis-"))
             await git.clone(project.repo_url, clone_dir, project.default_branch)
             log(f"cloned {project.github_owner}/{project.github_repo}")

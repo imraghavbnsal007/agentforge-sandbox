@@ -73,6 +73,16 @@ class Settings(BaseSettings):
     # Re-mint an installation token this many seconds before GitHub expires
     # it, so a long clone/push cannot straddle the boundary.
     installation_token_refresh_margin_seconds: int = 300
+
+    # Commit identity used when publishing through a GitHub App installation.
+    # Both are REQUIRED in github_app mode and deliberately have no default:
+    # inventing a noreply address would attribute commits to an identity that
+    # may not exist. Validated before the first App commit.
+    github_app_commit_name: str = ""
+    github_app_commit_email: str = ""
+    # AUTH_MODE=local keeps the original identity.
+    local_commit_name: str = "AgentForge"
+    local_commit_email: str = "agentforge@localhost"
     # Where GitHub sends the user back after authorization. Must match the
     # GitHub App's "Callback URL" exactly.
     github_app_callback_url: str = "http://localhost:8000/api/v1/auth/github/callback"
@@ -108,6 +118,15 @@ class Settings(BaseSettings):
     def github_app_configured(self) -> bool:
         """Whether installation tokens can be minted at all."""
         return bool(self.github_app_id and self.github_app_private_key_path)
+
+    def missing_commit_identity_settings(self) -> list[str]:
+        """Which commit-identity settings are unset. Empty means usable."""
+        missing = []
+        if not self.github_app_commit_name.strip():
+            missing.append("GITHUB_APP_COMMIT_NAME")
+        if not self.github_app_commit_email.strip():
+            missing.append("GITHUB_APP_COMMIT_EMAIL")
+        return missing
 
 
 settings = Settings()

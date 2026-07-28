@@ -162,3 +162,28 @@ class RedisKVStore:
         pipe.expire(key, ttl_seconds, nx=True)  # only the first write sets it
         result = await pipe.execute()
         return int(result[0])
+
+
+# -- Worker-side access -----------------------------------------------------
+#
+# Background jobs have no FastAPI app.state to read the KV store from, so they
+# share one lazily-created Redis client for the process.
+
+_shared_client = None
+
+
+def get_shared_kv() -> KVStore:
+    global _shared_client
+    if _shared_client is None:
+        import redis.asyncio as redis_asyncio
+
+        from app.core.config import settings
+
+        _shared_client = redis_asyncio.from_url(settings.redis_url)
+    return RedisKVStore(_shared_client)
+
+
+def reset_shared_kv() -> None:
+    """Drop the cached client (tests)."""
+    global _shared_client
+    _shared_client = None
