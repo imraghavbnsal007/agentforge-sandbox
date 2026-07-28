@@ -51,7 +51,10 @@ class FakeAPI:
 
 
 async def _make_github_task(session: AsyncSession, status: TaskStatus) -> Task:
+    from tests.helpers import local_user_id
+
     project = Project(
+        user_id=await local_user_id(session),
         name="GitHub Project",
         repo_path="",
         repo_url="https://github.com/acme/widget.git",
@@ -165,7 +168,7 @@ async def test_publish_failure_returns_to_review(
     await PublishService(session, publisher=publisher).publish_task(task_id)
 
     # The failure path rolls the session back, so reload state explicitly.
-    task = await TaskRepository(session).get_with_runs(task_id)
+    task = await TaskRepository(session).get_with_runs_unscoped_for_worker(task_id)
     assert task.status == TaskStatus.ready_for_review
     run = task.runs[-1]
     assert "no longer pass tests" in run.error
@@ -181,7 +184,7 @@ async def test_publish_binary_delete_uses_git_rm(
     monkeypatch.setattr(settings, "github_token", "tok")
     task = await _make_github_task(session, TaskStatus.publishing)
     # Re-fetch with runs + file_changes eagerly loaded (async session).
-    task = await TaskRepository(session).get_with_runs(task.id)
+    task = await TaskRepository(session).get_with_runs_unscoped_for_worker(task.id)
     run = task.runs[-1]
     run.file_changes.append(
         FileChange(
@@ -199,7 +202,7 @@ async def test_publish_binary_delete_uses_git_rm(
     publisher = GitHubPublisher(git=git, api=api, executor=FakeExecutor())
     await PublishService(session, publisher=publisher).publish_task(task.id)
 
-    task = await TaskRepository(session).get_with_runs(task.id)
+    task = await TaskRepository(session).get_with_runs_unscoped_for_worker(task.id)
     assert task.status == TaskStatus.completed
     assert git.deleted == ["old-archive.zip"]
     # The binary change's empty diff never went through git apply.
@@ -214,7 +217,7 @@ async def test_publish_binary_create_fails_clearly(
     monkeypatch.setattr(settings, "github_token", "tok")
     task = await _make_github_task(session, TaskStatus.publishing)
     # Re-fetch with runs + file_changes eagerly loaded (async session).
-    task = await TaskRepository(session).get_with_runs(task.id)
+    task = await TaskRepository(session).get_with_runs_unscoped_for_worker(task.id)
     run = task.runs[-1]
     run.file_changes.append(
         FileChange(
@@ -231,7 +234,7 @@ async def test_publish_binary_create_fails_clearly(
     publisher = GitHubPublisher(git=FakeGit(), api=FakeAPI(), executor=FakeExecutor())
     await PublishService(session, publisher=publisher).publish_task(task.id)
 
-    task = await TaskRepository(session).get_with_runs(task.id)
+    task = await TaskRepository(session).get_with_runs_unscoped_for_worker(task.id)
     assert task.status == TaskStatus.ready_for_review
     assert "binary" in task.runs[-1].error
     assert "generated.png" in task.runs[-1].error

@@ -7,6 +7,9 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 from app.db.base import Base
 
 if TYPE_CHECKING:
+    from app.models.github_installation_repository import (
+        GitHubInstallationRepository,
+    )
     from app.models.user_github_installation import UserGitHubInstallation
 
 # GitHub's own vocabulary, mirrored so comparisons read the same as the API.
@@ -60,6 +63,9 @@ class GitHubInstallation(Base):
     )
 
     user_links: Mapped[list["UserGitHubInstallation"]] = relationship(
+        back_populates="installation", cascade="all, delete-orphan"
+    )
+    repositories: Mapped[list["GitHubInstallationRepository"]] = relationship(
         back_populates="installation", cascade="all, delete-orphan"
     )
 

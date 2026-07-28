@@ -3,7 +3,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.enums import TaskStatus
 from app.core.exceptions import ConflictError, NotFoundError
-from app.models import LLMRun, ProjectAnalysis, Task
+from app.models import LLMRun, ProjectAnalysis, Task, User
 from app.repositories.project_repo import ProjectRepository
 from app.repositories.task_repo import TaskRepository
 from app.schemas.task import TaskCreate
@@ -12,9 +12,17 @@ from app.worker.queue import JobQueue
 
 
 class TaskService:
-    def __init__(self, session: AsyncSession, queue: JobQueue) -> None:
+    """Task operations for one owner.
+
+    The user is held on the service rather than passed per call, so no
+    method can accidentally run unscoped. Another user's task is reported as
+    not found — never forbidden — so callers cannot probe for existence.
+    """
+
+    def __init__(self, session: AsyncSession, queue: JobQueue, user: User) -> None:
         self.session = session
         self.queue = queue
+        self.user = user
         self.tasks = TaskRepository(session)
         self.projects = ProjectRepository(session)
 
@@ -23,7 +31,7 @@ class TaskService:
         from app.llm.base import all_providers
         from app.llm.profiles import get_profiles
 
-        project = await self.projects.get(data.project_id)
+        project = await self.projects.get(data.project_id, self.user.id)
         if project is None:
             raise NotFoundError(f"Project {data.project_id} not found")
         if data.llm_provider and data.llm_provider not in all_providers():
@@ -66,10 +74,10 @@ class TaskService:
         return task
 
     async def list_tasks(self, project_id: int | None = None) -> list[Task]:
-        return await self.tasks.list(project_id)
+        return await self.tasks.list(self.user.id, project_id)
 
     async def get_task_detail(self, task_id: int) -> Task:
-        task = await self.tasks.get_with_runs(task_id)
+        task = await self.tasks.get_with_runs(task_id, self.user.id)
         if task is None:
             raise NotFoundError(f"Task {task_id} not found")
         return task
@@ -102,7 +110,7 @@ class TaskService:
 
     async def retry_task(self, task_id: int) -> Task:
         """Re-enqueue an agent run for an existing task (a new AgentRun is created)."""
-        task = await self.tasks.get(task_id)
+        task = await self.tasks.get(task_id, self.user.id)
         if task is None:
             raise NotFoundError(f"Task {task_id} not found")
         task.status = TaskStatus.pending
@@ -129,7 +137,7 @@ class TaskService:
         return task
 
     async def _get_reviewable(self, task_id: int) -> Task:
-        task = await self.tasks.get(task_id)
+        task = await self.tasks.get(task_id, self.user.id)
         if task is None:
             raise NotFoundError(f"Task {task_id} not found")
         if task.status != TaskStatus.ready_for_review:

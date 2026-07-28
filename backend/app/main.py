@@ -15,6 +15,7 @@ from app.api.routes import (
     llm,
     meta,
     projects,
+    repositories,
     tasks,
     usage,
 )
@@ -160,6 +161,7 @@ def create_app(with_lifespan: bool = True) -> FastAPI:
     app.include_router(github_app.router, dependencies=protected)
     app.include_router(llm.router, dependencies=protected)
     app.include_router(projects.router, dependencies=protected)
+    app.include_router(repositories.router, dependencies=protected)
     app.include_router(tasks.router, dependencies=protected)
     app.include_router(usage.router, dependencies=protected)
     return app

@@ -474,12 +474,25 @@ async def test_cookie_authenticated_write_rejects_a_wrong_csrf_token(
 
 
 async def test_cookie_authenticated_write_succeeds_with_the_right_token(
-    signed_in: tuple[AsyncClient, User], github_app_mode, project
+    signed_in: tuple[AsyncClient, User],
+    github_app_mode,
+    session: AsyncSession,
 ):
-    client, _ = signed_in
+    client, user = signed_in
+    # The project must belong to the signed-in user — since Phase 6C a task
+    # cannot be created against someone else's project.
+    from app.models import Project
+
+    owned = Project(
+        user_id=user.id, name="Theirs", description="", repo_path="sample_repo"
+    )
+    session.add(owned)
+    await session.commit()
+    await session.refresh(owned)
+
     response = await client.post(
         "/api/v1/tasks",
-        json={"project_id": project.id, "title": "T", "request": "r"},
+        json={"project_id": owned.id, "title": "T", "request": "r"},
     )
     assert response.status_code == 201
 

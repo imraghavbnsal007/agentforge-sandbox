@@ -112,8 +112,25 @@ async def signed_in(
 
 
 @pytest.fixture
-async def project(session: AsyncSession) -> Project:
-    project = Project(name="Demo Project", description="", repo_path="sample_repo")
+async def local_user(session: AsyncSession) -> User:
+    """The AUTH_MODE=local account every unauthenticated request resolves to.
+
+    Created through the same service the application uses, so tests and
+    production agree on what the local user is.
+    """
+    from app.services.user_service import UserService
+
+    return await UserService(session).get_or_create_local_user()
+
+
+@pytest.fixture
+async def project(session: AsyncSession, local_user: User) -> Project:
+    project = Project(
+        user_id=local_user.id,
+        name="Demo Project",
+        description="",
+        repo_path="sample_repo",
+    )
     session.add(project)
     await session.commit()
     await session.refresh(project)

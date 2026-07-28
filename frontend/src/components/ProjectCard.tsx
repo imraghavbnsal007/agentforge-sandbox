@@ -53,8 +53,12 @@ export function ProjectCard({
 
   return (
     <motion.article
-      initial={{ opacity: 0, y: 14 }}
-      animate={{ opacity: 1, y: 0 }}
+      // Transform only — never opacity. requestAnimationFrame is throttled in
+      // background tabs, so an opacity entrance can freeze at 0 and leave the
+      // card invisible. Content must never depend on an animation completing;
+      // a frozen transform is merely a small offset.
+      initial={{ y: 14 }}
+      animate={{ y: 0 }}
       transition={{ duration: 0.35, delay: Math.min(index * 0.05, 0.4), ease: "easeOut" }}
       className="card card-hover relative flex flex-col gap-4 p-5"
     >

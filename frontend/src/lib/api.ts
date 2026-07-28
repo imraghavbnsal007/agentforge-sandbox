@@ -1,3 +1,5 @@
+import type { RepositoryList } from "@/lib/repositories";
+
 // Server-side base URL: inside Docker Compose this is http://backend:8000
 // (set via the API_URL env var); locally it defaults to localhost.
 const API_URL = process.env.API_URL ?? "http://localhost:8000";
@@ -353,6 +355,33 @@ function postAction(id: number, action: string): Promise<Task> {
 /** Browser-side: end the current session. */
 export function logout(): Promise<void> {
   return mutate<void>("/api/v1/auth/logout", { method: "POST" });
+}
+
+/** Server-side: repositories the caller's GitHub App installations grant. */
+export function getRepositories(): Promise<RepositoryList> {
+  return get<RepositoryList>("/api/v1/repositories");
+}
+
+/** Browser-side: re-read the grant list from GitHub. */
+export function refreshRepositories(): Promise<RepositoryList> {
+  return mutate<RepositoryList>("/api/v1/repositories/refresh", {
+    method: "POST",
+  });
+}
+
+/**
+ * Browser-side: register a granted repository.
+ *
+ * Identified by GitHub's numeric repository id — never a user-supplied URL —
+ * so the backend can check it against the caller's own installation grants.
+ */
+export function registerRepository(
+  githubRepositoryId: number,
+): Promise<Project> {
+  return mutate<Project>("/api/v1/repositories/register", {
+    method: "POST",
+    body: { github_repository_id: githubRepositoryId },
+  });
 }
 
 /** Browser-side: re-enqueue an agent run for an existing task. */

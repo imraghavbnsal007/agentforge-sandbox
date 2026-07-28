@@ -115,8 +115,11 @@ export function TaskCard({
 
   return (
     <motion.article
-      initial={{ opacity: 0, y: 14 }}
-      animate={{ opacity: 1, y: 0 }}
+      // Transform only — never opacity. See ProjectCard: an opacity entrance
+      // can freeze at 0 when requestAnimationFrame is throttled in a
+      // background tab, hiding the card entirely.
+      initial={{ y: 14 }}
+      animate={{ y: 0 }}
       transition={{ duration: 0.35, delay: Math.min(index * 0.05, 0.4), ease: "easeOut" }}
       className="card card-hover group relative flex flex-col gap-3 p-5 focus-within:border-line-strong"
     >
