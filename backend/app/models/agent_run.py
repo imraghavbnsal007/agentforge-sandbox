@@ -1,10 +1,10 @@
 from datetime import datetime
 from typing import TYPE_CHECKING
 
-from sqlalchemy import JSON, DateTime, ForeignKey, String, Text, func
+from sqlalchemy import Integer, JSON, DateTime, ForeignKey, String, Text, func
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
-from app.core.enums import AgentMode, RunStatus
+from app.core.enums import AgentMode, RunStage, RunStatus
 from app.db.base import Base, str_enum
 
 if TYPE_CHECKING:
@@ -24,6 +24,31 @@ class AgentRun(Base):
     status: Mapped[RunStatus] = mapped_column(
         str_enum(RunStatus), default=RunStatus.running
     )
+    # Fine-grained position within the run; `status` stays the coarse outcome.
+    stage: Mapped[RunStage] = mapped_column(
+        str_enum(RunStage), default=RunStage.queued
+    )
+    progress: Mapped[int] = mapped_column(Integer, default=0)
+    # Safe, typed failure reason. The frontend maps this to a message; raw
+    # exception text is never shown to a user.
+    error_code: Mapped[str | None] = mapped_column(String(60), nullable=True)
+    # Renewed by the worker while it holds the run. A stale heartbeat with a
+    # running status is how an abandoned run is detected after a crash.
+    heartbeat_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    # Set when a user asks to cancel; the worker stops at its next checkpoint.
+    cancel_requested_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    # Retry lineage. The previous run is never mutated — a retry creates a new
+    # row pointing back at the one it replaces.
+    retry_of_run_id: Mapped[int | None] = mapped_column(
+        ForeignKey("agent_runs.id", ondelete="SET NULL"), nullable=True
+    )
+    # Normalised usage, aggregated from llm_runs at the end of the run.
+    model_calls: Mapped[int] = mapped_column(Integer, default=0)
+    tool_calls: Mapped[int] = mapped_column(Integer, default=0)
     plan: Mapped[list | None] = mapped_column(JSON, nullable=True)
     summary: Mapped[str | None] = mapped_column(Text, nullable=True)
     log: Mapped[str | None] = mapped_column(Text, nullable=True)

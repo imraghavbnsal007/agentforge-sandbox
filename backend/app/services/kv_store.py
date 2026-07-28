@@ -37,6 +37,29 @@ class KVStore(Protocol):
         new value."""
         ...
 
+    async def set_if_absent(self, key: str, value: str, ttl_seconds: int) -> bool:
+        """Atomic SET NX. True when this caller took the key.
+
+        The primitive behind the execution lock: two workers racing for the
+        same task cannot both win, because the decision happens in Redis.
+        """
+        ...
+
+    async def compare_and_delete(self, key: str, value: str) -> bool:
+        """Delete only if the value still matches — releasing a lock we no
+        longer own must not steal someone else's."""
+        ...
+
+    async def compare_and_extend(
+        self, key: str, value: str, ttl_seconds: int
+    ) -> bool:
+        """Renew a lease we still hold. Returns False once it has expired."""
+        ...
+
+    async def publish(self, channel: str, message: str) -> None:
+        """Fan out a message. Best-effort by design."""
+        ...
+
 
 class InMemoryKVStore:
     """Test/local double. Expiry is evaluated lazily on read."""
@@ -44,6 +67,8 @@ class InMemoryKVStore:
     def __init__(self) -> None:
         self._values: dict[str, tuple[str, float]] = {}
         self._sets: dict[str, tuple[set[str], float]] = {}
+        # Channel -> messages, so tests can assert what was broadcast.
+        self.published: dict[str, list[str]] = {}
 
     def _live(self, expires_at: float) -> bool:
         return expires_at > time.monotonic()
@@ -99,6 +124,29 @@ class InMemoryKVStore:
             _, expires_at = self._values[key]
             self._values[key] = (str(value), expires_at)
         return value
+
+    async def set_if_absent(self, key: str, value: str, ttl_seconds: int) -> bool:
+        if await self.get(key) is not None:
+            return False
+        await self.set(key, value, ttl_seconds)
+        return True
+
+    async def compare_and_delete(self, key: str, value: str) -> bool:
+        if await self.get(key) != value:
+            return False
+        await self.delete(key)
+        return True
+
+    async def compare_and_extend(
+        self, key: str, value: str, ttl_seconds: int
+    ) -> bool:
+        if await self.get(key) != value:
+            return False
+        await self.set(key, value, ttl_seconds)
+        return True
+
+    async def publish(self, channel: str, message: str) -> None:
+        self.published.setdefault(channel, []).append(message)
 
     # -- Test helpers (not part of the protocol) ---------------------------
 
@@ -162,6 +210,32 @@ class RedisKVStore:
         pipe.expire(key, ttl_seconds, nx=True)  # only the first write sets it
         result = await pipe.execute()
         return int(result[0])
+
+    async def set_if_absent(self, key: str, value: str, ttl_seconds: int) -> bool:
+        # SET NX EX is atomic: the winner is decided by Redis, not by a
+        # read-then-write in application code.
+        return bool(await self._client.set(key, value, ex=ttl_seconds, nx=True))
+
+    async def compare_and_delete(self, key: str, value: str) -> bool:
+        script = (
+            "if redis.call('get', KEYS[1]) == ARGV[1] then "
+            "return redis.call('del', KEYS[1]) else return 0 end"
+        )
+        return bool(await self._client.eval(script, 1, key, value))
+
+    async def compare_and_extend(
+        self, key: str, value: str, ttl_seconds: int
+    ) -> bool:
+        script = (
+            "if redis.call('get', KEYS[1]) == ARGV[1] then "
+            "return redis.call('expire', KEYS[1], ARGV[2]) else return 0 end"
+        )
+        return bool(
+            await self._client.eval(script, 1, key, value, str(ttl_seconds))
+        )
+
+    async def publish(self, channel: str, message: str) -> None:
+        await self._client.publish(channel, message)
 
 
 # -- Worker-side access -----------------------------------------------------

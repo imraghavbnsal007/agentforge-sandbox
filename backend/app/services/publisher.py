@@ -21,7 +21,14 @@ from app.agent.executor import PytestExecutor, TestExecutor
 from app.agent.runner import LogFn
 from app.agent.workspace import Workspace
 from app.core.config import settings
-from app.core.enums import ChangeType, RunStatus, TaskStatus
+from app.core.enums import (
+    ChangeType,
+    ErrorCode,
+    RunStage,
+    RunStatus,
+    TaskEventType,
+    TaskStatus,
+)
 from app.core.exceptions import NotFoundError
 from app.models import AgentRun, Project, Task
 from app.services.git_client import GitAuthError, GitClient
@@ -69,6 +76,7 @@ class GitHubPublisher:
         api: GitHubAPI | None = None,
         executor: TestExecutor | None | object = _DEFAULT_EXECUTOR,
         resolver: GitHubCredentialResolver | None = None,
+        tracker=None,
     ) -> None:
         # An injected client keeps its own credentials (tests); otherwise one
         # is built per operation from freshly resolved credentials.
@@ -81,9 +89,36 @@ class GitHubPublisher:
         )
         self.api = api or GitHubAPI()
         self.resolver = resolver
+        # Publishing emits through the same tracker the agent run uses, so
+        # the SSE stream is continuous across both phases.
+        self.tracker = tracker
         # None means "skip verification"; the default is pytest.
         self.executor: TestExecutor | None = (
             PytestExecutor() if executor is _DEFAULT_EXECUTOR else executor
+        )
+
+    async def _event(
+        self,
+        event_type,
+        message: str,
+        *,
+        stage=None,
+        error_code: str | None = None,
+        metadata: dict | None = None,
+    ) -> None:
+        """Emit a publish event when a tracker is present.
+
+        Metadata passes through TaskEventService's allowlist, so a token or an
+        authenticated URL cannot reach a client even if a caller passed one.
+        """
+        if self.tracker is None:
+            return
+        await self.tracker.emit(
+            event_type,
+            stage=stage,
+            message=message,
+            error_code=error_code,
+            metadata=metadata,
         )
 
     async def _credentials(
@@ -112,9 +147,26 @@ class GitHubPublisher:
         if not run.file_changes:
             raise PublishError("The run has no file changes to publish")
 
+        await self._event(
+            TaskEventType.publish_started,
+            "Publishing started",
+            stage=RunStage.pushing,
+        )
+
         clone_dir = Path(tempfile.mkdtemp(prefix="agentforge-publish-"))
         try:
             clone_creds = await self._credentials(project, RepoOperation.clone)
+            await self._event(
+                TaskEventType.stage_changed,
+                "Repository access verified",
+                stage=RunStage.pushing,
+                metadata={
+                    # Names only — never the token or an authenticated URL.
+                    "reason": "installation"
+                    if clone_creds and clone_creds.is_installation
+                    else "local"
+                },
+            )
             git = self._client_for(clone_creds)
             if clone_creds is not None:
                 log(f"credential: {clone_creds.mode} "
@@ -123,7 +175,17 @@ class GitHubPublisher:
                     else "credential: local personal access token")
             log(f"cloning {project.github_owner}/{project.github_repo} "
                 f"(branch {project.default_branch})")
+            await self._event(
+                TaskEventType.stage_changed,
+                "Cloning repository",
+                stage=RunStage.pushing,
+            )
             await git.clone(project.repo_url, clone_dir, project.default_branch)
+            await self._event(
+                TaskEventType.stage_changed,
+                "Repository cloned",
+                stage=RunStage.pushing,
+            )
 
             branch = branch_name_for(task)
             await git.create_branch(clone_dir, branch)
@@ -186,6 +248,12 @@ class GitHubPublisher:
         branch already carries our commit — a rejected response can arrive
         after the push actually landed.
         """
+        await self._event(
+            TaskEventType.stage_changed,
+            f"Pushing branch {branch}",
+            stage=RunStage.pushing,
+            metadata={"branch": branch},
+        )
         credentials = await self._credentials(project, RepoOperation.push)
         git = self._client_for(credentials)
         try:
@@ -205,6 +273,12 @@ class GitHubPublisher:
                 return
             await git.push(clone_dir, project.repo_url, branch)
         log("pushed branch to origin")
+        await self._event(
+            TaskEventType.branch_pushed,
+            f"Branch {branch} pushed",
+            stage=RunStage.pushing,
+            metadata={"branch": branch, "commit_sha": sha},
+        )
 
     async def _open_pull_request(
         self, project: Project, task: Task, run: AgentRun, branch: str, log: LogFn
@@ -216,6 +290,12 @@ class GitHubPublisher:
         """
         body = (run.summary or task.request) + (
             "\n\n---\n*Opened by AgentForge from an approved agent run.*"
+        )
+        await self._event(
+            TaskEventType.stage_changed,
+            "Creating pull request",
+            stage=RunStage.creating_pr,
+            metadata={"branch": branch},
         )
         credentials = await self._credentials(project, RepoOperation.pull_request)
         if credentials is None and settings.is_github_app_mode():
@@ -256,6 +336,12 @@ class GitHubPublisher:
                 token=credentials.token,
             )
         log(f"pull request opened: {pr_url}")
+        await self._event(
+            TaskEventType.pr_created,
+            "Pull request opened",
+            stage=RunStage.creating_pr,
+            metadata={"pr_url": pr_url, "branch": branch},
+        )
         return pr_url
 
 
@@ -263,10 +349,14 @@ class PublishService:
     """Worker-side orchestration for the approve -> publish flow."""
 
     def __init__(
-        self, session: AsyncSession, publisher: GitHubPublisher | None = None
+        self,
+        session: AsyncSession,
+        publisher: GitHubPublisher | None = None,
+        events=None,
     ) -> None:
         self.session = session
         self._injected = publisher is not None
+        self._events = events
         if publisher is None:
             from app.services.github_app_token_service import GitHubAppTokenService
             from app.services.kv_store import get_shared_kv
@@ -330,6 +420,24 @@ class PublishService:
                     else None
                 )
 
+        # Publishing shares the run's tracker so its events land on the same
+        # SSE stream, with per-run sequence numbers continuing uninterrupted.
+        if self._events is not None and self.publisher.tracker is None:
+            from app.services.run_progress import RunTracker
+
+            self.publisher.tracker = RunTracker(
+                self.session,
+                task,
+                run,
+                user_id=project.user_id,
+                events=self._events,
+                publishing=True,
+            )
+
+        failure_code: str | None = None
+        # Captured before the try: after a rollback these instances are
+        # expired, and reading an attribute would trigger a lazy load.
+        ids = (task.id, run.id, project.user_id)
         try:
             result = await self.publisher.publish(project, task, run, log)
             run.branch_name = result.branch_name
@@ -345,13 +453,59 @@ class PublishService:
             await self.session.rollback()
             log(f"publish blocked: {exc}")
             run.error = str(exc)
+            run.error_code = ErrorCode.repository_access_lost
             task.status = TaskStatus.ready_for_review
+            failure_code = ErrorCode.repository_access_lost
         except Exception as exc:
             logger.exception("Publish failed for task %s", task_id)
             # A flush error leaves the session unusable until rolled back.
             await self.session.rollback()
             log(f"publish failed: {exc}")
+            from app.core.error_codes import classify
+
+            code = classify(exc)
             run.error = str(exc)
+            run.error_code = code
             # Back to ready_for_review so the user can fix the cause and approve again.
             task.status = TaskStatus.ready_for_review
+            failure_code = code
         await self.session.commit()
+
+        # Emitted only after the commit: inside the handler the session is
+        # mid-rollback and the instances are expired, so writing an event
+        # there would fail on a lazy load.
+        if failure_code is not None:
+            await self._publish_failed(*ids, failure_code)
+
+    async def _publish_failed(
+        self, task_id: int, run_id: int, user_id: int, code: str
+    ) -> None:
+        """Announce a blocked or failed publish.
+
+        Takes ids rather than instances: by the time this runs the session has
+        been rolled back and re-committed, so the originals are expired.
+
+        The message comes from the error catalogue, never from the exception —
+        a raw message can carry a path, a command, or an upstream response.
+        Generated changes are untouched; only publishing stopped.
+        """
+        if self._events is None:
+            return
+        from app.core.error_codes import describe
+
+        try:
+            task = await self.session.get(Task, task_id)
+            run = await self.session.get(AgentRun, run_id)
+            if task is None:
+                return
+            await self._events.emit(
+                task,
+                TaskEventType.publish_failed,
+                run=run,
+                user_id=user_id,
+                stage=RunStage.failed,
+                message=describe(code).message,
+                error_code=code,
+            )
+        except Exception:
+            logger.warning("Could not emit publish failure for task %s", task_id)

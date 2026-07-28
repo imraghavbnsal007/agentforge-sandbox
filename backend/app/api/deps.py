@@ -6,7 +6,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 if TYPE_CHECKING:
     from app.services.github_app_token_service import GitHubAppTokenService
     from app.services.installation_service import InstallationService
+    from app.services.execution_lock import CancellationSignal
     from app.services.repository_discovery import RepositoryDiscoveryService
+    from app.services.task_events import TaskEventService
 
 from app.core.audit import SESSION_REJECTED, audit
 from app.core.config import settings
@@ -165,16 +167,48 @@ def get_project_service(session: DbSession, user: CurrentUser) -> ProjectService
     return ProjectService(session, user)
 
 
+def get_events_service(session: DbSession, kv: KV) -> "TaskEventService":
+    from app.services.task_events import TaskEventService
+
+    return TaskEventService(session, kv)
+
+
+Events = Annotated["TaskEventService", Depends(get_events_service)]
+
+
+def get_cancellation(kv: KV) -> "CancellationSignal":
+    from app.services.execution_lock import CancellationSignal
+
+    return CancellationSignal(kv)
+
+
+Cancellation = Annotated["CancellationSignal", Depends(get_cancellation)]
+
+
 def get_task_service(
-    session: DbSession, queue: Queue, user: CurrentUser
+    session: DbSession,
+    queue: Queue,
+    user: CurrentUser,
+    kv: KV,
 ) -> TaskService:
-    return TaskService(session, queue, user)
+    from app.services.execution_lock import CancellationSignal
+    from app.services.task_events import TaskEventService
+
+    return TaskService(
+        session,
+        queue,
+        user,
+        cancellation=CancellationSignal(kv),
+        events=TaskEventService(session, kv),
+    )
 
 
 def get_discovery_service(
     session: DbSession, token_service: TokenService
 ) -> "RepositoryDiscoveryService":
+    from app.services.execution_lock import CancellationSignal
     from app.services.repository_discovery import RepositoryDiscoveryService
+    from app.services.task_events import TaskEventService
 
     return RepositoryDiscoveryService(session, token_service)
 

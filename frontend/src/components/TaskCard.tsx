@@ -30,6 +30,8 @@ const PROGRESS: Record<TaskStatus, number> = {
   completed: 100,
   failed: 100,
   rejected: 100,
+  cancelled: 100,
+  publish_failed: 100,
 };
 
 const BAR_COLOR: Record<string, string> = {

@@ -17,7 +17,44 @@ export type TaskStatus =
   | "publishing"
   | "rejected"
   | "completed"
-  | "failed";
+  | "failed"
+  | "cancelled"
+  | "publish_failed";
+
+export type RunStage =
+  | "queued"
+  | "preparing"
+  | "cloning"
+  | "analysing"
+  | "planning"
+  | "generating"
+  | "testing"
+  | "summarising"
+  | "awaiting_review"
+  | "pushing"
+  | "creating_pr"
+  | "completed"
+  | "failed"
+  | "cancelled";
+
+export interface TaskEvent {
+  id: number;
+  task_id: number;
+  run_id: number | null;
+  sequence_number: number;
+  event_type: string;
+  stage: RunStage | null;
+  message: string | null;
+  progress: number | null;
+  error_code: string | null;
+  safe_metadata: Record<string, unknown> | null;
+  created_at: string;
+}
+
+export interface TaskEventPage {
+  events: TaskEvent[];
+  next_cursor: number | null;
+}
 
 export type ChangeType = "create" | "modify" | "delete";
 
@@ -386,6 +423,33 @@ export function registerRepository(
 
 /** Browser-side: re-enqueue an agent run for an existing task. */
 export const retryTask = (id: number) => postAction(id, "retry");
+/** Browser-side: ask the worker to stop at its next safe checkpoint. */
+export const cancelTask = (id: number) => postAction(id, "cancel");
+/**
+ * Browser-side: run a finished task again as a NEW task.
+ *
+ * Completed tasks are terminal, so this is how the work is repeated without
+ * the finished result becoming ambiguous. The original is untouched.
+ */
+export const duplicateTask = (id: number) => postAction(id, "duplicate");
+
+/** Browser-side: event history after a cursor — the replay source. */
+export async function getTaskEvents(
+  id: number,
+  afterId = 0,
+): Promise<TaskEventPage> {
+  const res = await fetch(
+    `${PUBLIC_API_URL}/api/v1/tasks/${id}/events?after_id=${afterId}`,
+    { credentials: "include", cache: "no-store" },
+  );
+  if (!res.ok) throw new Error(`Could not load events (${res.status})`);
+  return res.json();
+}
+
+/** URL of the live event stream for a task. */
+export function taskStreamUrl(id: number, afterId = 0): string {
+  return `${PUBLIC_API_URL}/api/v1/tasks/${id}/stream?last_event_id=${afterId}`;
+}
 /** Browser-side: approve a reviewed task — publishes branch + PR. */
 export const approveTask = (id: number) => postAction(id, "approve");
 /** Browser-side: reject a reviewed task. */

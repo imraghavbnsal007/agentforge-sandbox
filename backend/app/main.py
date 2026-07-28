@@ -36,6 +36,7 @@ from app.core.security import (
     csrf_token_matches,
     read_session_cookie,
 )
+from app.core.logging_config import configure_logging, log_context, new_request_id
 from app.core.startup_checks import enforce_configuration
 from app.services.kv_store import InMemoryKVStore, RedisKVStore
 from app.services.session_store import SessionStore
@@ -62,6 +63,7 @@ def _validate_cors_config() -> list[str]:
 async def lifespan(app: FastAPI):
     # Refuse to boot a misconfigured deployment rather than failing at the
     # first user request. Local mode requires no GitHub App settings.
+    configure_logging()
     enforce_configuration()
     app.state.arq_pool = await create_pool(RedisSettings.from_dsn(settings.redis_url))
     # Sessions, OAuth state and rate limits share one Redis client, separate
@@ -90,6 +92,20 @@ def create_app(with_lifespan: bool = True) -> FastAPI:
         allow_methods=["*"],
         allow_headers=["*"],
     )
+
+    @app.middleware("http")
+    async def correlate(request: Request, call_next):
+        """Give every request an id and bind it for the whole call.
+
+        An inbound X-Request-ID is honoured so a proxy or client can carry
+        correlation in from outside; otherwise one is generated. It is echoed
+        back so a user can quote it when reporting a problem.
+        """
+        request_id = request.headers.get("X-Request-ID") or new_request_id()
+        with log_context(request_id=request_id):
+            response = await call_next(request)
+        response.headers["X-Request-ID"] = request_id
+        return response
 
     @app.middleware("http")
     async def csrf_protection(request: Request, call_next):

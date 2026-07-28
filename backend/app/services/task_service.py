@@ -1,7 +1,8 @@
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.enums import TaskStatus
+from app.core.enums import RunStatus, TaskEventType, TaskStatus
+from app.core.task_state import assert_transition, is_cancellable, is_retryable
 from app.core.exceptions import ConflictError, NotFoundError
 from app.models import LLMRun, ProjectAnalysis, Task, User
 from app.repositories.project_repo import ProjectRepository
@@ -19,12 +20,21 @@ class TaskService:
     not found — never forbidden — so callers cannot probe for existence.
     """
 
-    def __init__(self, session: AsyncSession, queue: JobQueue, user: User) -> None:
+    def __init__(
+        self,
+        session: AsyncSession,
+        queue: JobQueue,
+        user: User,
+        cancellation=None,
+        events=None,
+    ) -> None:
         self.session = session
         self.queue = queue
         self.user = user
         self.tasks = TaskRepository(session)
         self.projects = ProjectRepository(session)
+        self._cancellation = cancellation
+        self._events = events
 
     async def create_task(self, data: TaskCreate) -> Task:
         from app.core.exceptions import InvalidInputError
@@ -109,15 +119,108 @@ class TaskService:
         return summary
 
     async def retry_task(self, task_id: int) -> Task:
-        """Re-enqueue an agent run for an existing task (a new AgentRun is created)."""
-        task = await self.tasks.get(task_id, self.user.id)
+        """Start a fresh run, preserving everything the previous one produced.
+
+        A retry never mutates the earlier run: execute_agent_run creates a new
+        AgentRun, and the new row records which run it replaces so the history
+        stays navigable.
+        """
+        task = await self.tasks.get_with_runs(task_id, self.user.id)
         if task is None:
             raise NotFoundError(f"Task {task_id} not found")
+        if not is_retryable(task.status):
+            raise ConflictError(
+                f"Task {task_id} is {task.status} and cannot be retried"
+            )
+        # Refuse while something is still running, rather than racing it.
+        active = [r for r in task.runs if r.status == RunStatus.running]
+        if active:
+            raise ConflictError(
+                f"Task {task_id} already has a run in progress"
+            )
+
+        assert_transition(task.status, TaskStatus.pending)
         task.status = TaskStatus.pending
         await self.session.commit()
         # updated_at is server-generated on UPDATE, so refresh before serializing.
         await self.session.refresh(task)
+        # A stale cancellation must not immediately stop the new run.
+        if self._cancellation is not None:
+            await self._cancellation.clear(task.id)
         await self.queue.enqueue_run_agent(task.id)
+        return task
+
+    async def duplicate_task(self, task_id: int) -> Task:
+        """Create a fresh task from a finished one.
+
+        Completed tasks are terminal, so re-running means starting a new one.
+        This copies the request and the model choices, and deliberately copies
+        nothing else: no run history, no workspace, no branch. The original is
+        left exactly as it was.
+        """
+        source = await self.tasks.get(task_id, self.user.id)
+        if source is None:
+            raise NotFoundError(f"Task {task_id} not found")
+
+        return await self.create_task(
+            TaskCreate(
+                project_id=source.project_id,
+                title=source.title,
+                request=source.request,
+                llm_provider=source.llm_provider,
+                llm_model=source.llm_model,
+                execution_profile=source.execution_profile,
+            )
+        )
+
+    async def cancel_task(self, task_id: int) -> Task:
+        """Ask the worker to stop at its next safe checkpoint.
+
+        The request is recorded in both Redis (for promptness) and on the run
+        row (so it survives a Redis restart). A queued task that has not yet
+        started is cancelled outright, since there is no worker to signal.
+        """
+        from datetime import datetime, timezone
+
+        task = await self.tasks.get_with_runs(task_id, self.user.id)
+        if task is None:
+            raise NotFoundError(f"Task {task_id} not found")
+        if not is_cancellable(task.status):
+            raise ConflictError(
+                f"Task {task_id} is {task.status} and cannot be cancelled"
+            )
+
+        if self._cancellation is not None:
+            await self._cancellation.request(task.id, self.user.id)
+
+        now = datetime.now(timezone.utc)
+        active = [r for r in task.runs if r.status == RunStatus.running]
+        for run in active:
+            run.cancel_requested_at = now
+        # Hold the run itself, not a reference read after a refresh: refresh
+        # expires the collection and a later attribute access would lazy-load.
+        active_run = active[0] if active else None
+        was_running = bool(active)
+
+        if not was_running:
+            # Nothing is running, so no checkpoint will ever be reached.
+            assert_transition(task.status, TaskStatus.cancelled)
+            task.status = TaskStatus.cancelled
+        await self.session.commit()
+
+        if self._events is not None:
+            await self._events.emit(
+                task,
+                TaskEventType.warning if was_running else TaskEventType.run_cancelled,
+                run=active_run,
+                user_id=self.user.id,
+                message=(
+                    "Cancellation requested — stopping at the next safe checkpoint"
+                    if was_running
+                    else "Cancelled"
+                ),
+            )
+        await self.session.refresh(task)
         return task
 
     async def approve_task(self, task_id: int) -> Task:
