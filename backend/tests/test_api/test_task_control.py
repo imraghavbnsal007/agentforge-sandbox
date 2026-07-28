@@ -237,3 +237,81 @@ async def test_no_token_reaches_the_events_endpoint(
     )
     response = await client.get(f"/api/v1/tasks/{task.id}/events")
     assert token not in response.text
+
+
+# -- run again as a new task ------------------------------------------------
+
+
+async def test_a_completed_task_can_be_run_again_as_a_new_task(
+    client: AsyncClient, session: AsyncSession, task: Task, fake_queue
+):
+    """Completed stays terminal; repeating the work means a new task."""
+    task.status = TaskStatus.completed
+    await session.commit()
+
+    response = await client.post(f"/api/v1/tasks/{task.id}/duplicate")
+
+    assert response.status_code == 201
+    created = response.json()
+    assert created["id"] != task.id
+    assert created["title"] == task.title
+    assert created["request"] == task.request
+    assert created["project_id"] == task.project_id
+    assert created["status"] == "pending"
+    assert fake_queue.enqueued == [created["id"]]
+
+
+async def test_running_again_preserves_the_original(
+    client: AsyncClient, session: AsyncSession, task: Task
+):
+    task.status = TaskStatus.completed
+    await session.commit()
+
+    await client.post(f"/api/v1/tasks/{task.id}/duplicate")
+
+    await session.refresh(task)
+    assert task.status == TaskStatus.completed
+
+
+async def test_running_again_copies_the_model_choices(
+    client: AsyncClient, session: AsyncSession, task: Task
+):
+    task.status = TaskStatus.completed
+    task.llm_provider = "google"
+    task.llm_model = "gemini-3.1-flash-lite"
+    task.execution_profile = "cheap"
+    await session.commit()
+
+    created = (await client.post(f"/api/v1/tasks/{task.id}/duplicate")).json()
+
+    assert created["llm_provider"] == "google"
+    assert created["llm_model"] == "gemini-3.1-flash-lite"
+    assert created["execution_profile"] == "cheap"
+
+
+async def test_running_again_starts_with_no_run_history(
+    client: AsyncClient, session: AsyncSession, task: Task
+):
+    """The new task must not inherit the old workspace or runs."""
+    task.status = TaskStatus.completed
+    await session.commit()
+
+    created = (await client.post(f"/api/v1/tasks/{task.id}/duplicate")).json()
+    detail = (await client.get(f"/api/v1/tasks/{created['id']}")).json()
+
+    assert detail["runs"] == []
+    assert detail["latest_run"] is None
+
+
+async def test_running_again_is_scoped_to_the_owner(
+    client: AsyncClient, kv: InMemoryKVStore, other_users_task, app_mode
+):
+    _, bob, task = other_users_task
+    await _sign_in(client, kv, bob)
+    assert (
+        await client.post(f"/api/v1/tasks/{task.id}/duplicate")
+    ).status_code == 404
+
+
+async def test_running_again_an_unknown_task_is_404(client: AsyncClient):
+    assert (await client.post("/api/v1/tasks/9999/duplicate")).status_code == 404

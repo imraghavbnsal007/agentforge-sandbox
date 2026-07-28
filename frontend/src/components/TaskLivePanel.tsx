@@ -4,8 +4,14 @@ import { useRouter } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
 
 import { Button, Spinner } from "@/components/ui/Button";
-import { IconClock, IconRetry } from "@/components/ui/Icons";
-import { cancelTask, retryTask, type RunStage, type TaskStatus } from "@/lib/api";
+import { IconClock, IconCopy, IconRetry } from "@/components/ui/Icons";
+import {
+  cancelTask,
+  duplicateTask,
+  retryTask,
+  type RunStage,
+  type TaskStatus,
+} from "@/lib/api";
 import { useTaskEvents, type StreamState } from "@/lib/useTaskEvents";
 
 const TERMINAL: TaskStatus[] = [
@@ -132,12 +138,16 @@ export function TaskLivePanel({
 }) {
   const router = useRouter();
   const terminal = TERMINAL.includes(status);
+  // Completed tasks stay terminal — repeating the work means a new task.
+  const canRunAgain = status === "completed";
   const { events, state, latest, progress, stage, reconnect } = useTaskEvents({
     taskId,
     terminal,
   });
 
-  const [busy, setBusy] = useState<"cancel" | "retry" | null>(null);
+  const [busy, setBusy] = useState<"cancel" | "retry" | "duplicate" | null>(
+    null,
+  );
   const [error, setError] = useState<string | null>(null);
   const [cancelRequested, setCancelRequested] = useState(false);
   const timelineRef = useRef<HTMLOListElement>(null);
@@ -171,6 +181,19 @@ export function TaskLivePanel({
       router.refresh();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Could not cancel");
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  async function onRunAgain() {
+    setBusy("duplicate");
+    setError(null);
+    try {
+      const created = await duplicateTask(taskId);
+      router.push(`/tasks/${created.id}`);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not create the task");
     } finally {
       setBusy(null);
     }
@@ -255,6 +278,22 @@ export function TaskLivePanel({
             disabled={busy !== null || cancelRequested}
           >
             {busy === "cancel" ? <Spinner className="h-3.5 w-3.5" /> : "Cancel"}
+          </Button>
+        )}
+        {canRunAgain && (
+          <Button
+            variant="secondary"
+            size="sm"
+            onClick={onRunAgain}
+            disabled={busy !== null}
+            title="Create a new task with the same request"
+          >
+            {busy === "duplicate" ? (
+              <Spinner className="h-3.5 w-3.5" />
+            ) : (
+              <IconCopy className="h-3.5 w-3.5" />
+            )}
+            Run again as new task
           </Button>
         )}
         {RETRYABLE.includes(status) && (

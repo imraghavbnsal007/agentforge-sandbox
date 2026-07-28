@@ -425,6 +425,13 @@ export function registerRepository(
 export const retryTask = (id: number) => postAction(id, "retry");
 /** Browser-side: ask the worker to stop at its next safe checkpoint. */
 export const cancelTask = (id: number) => postAction(id, "cancel");
+/**
+ * Browser-side: run a finished task again as a NEW task.
+ *
+ * Completed tasks are terminal, so this is how the work is repeated without
+ * the finished result becoming ambiguous. The original is untouched.
+ */
+export const duplicateTask = (id: number) => postAction(id, "duplicate");
 
 /** Browser-side: event history after a cursor — the replay source. */
 export async function getTaskEvents(

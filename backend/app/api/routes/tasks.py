@@ -13,6 +13,7 @@ from app.schemas.task import (
     TaskEventRead,
     TaskRead,
 )
+from app.services.run_usage import usage_for_run
 from app.services.task_service import TaskService
 
 router = APIRouter(prefix="/api/v1/tasks", tags=["tasks"])
@@ -34,6 +35,9 @@ async def _to_detail(task: Task, service: TaskService) -> TaskDetail:
     for run_read, run_orm in zip(runs, task.runs):
         if run_orm.id in llm_summary:
             run_read.llm_provider, run_read.llm_model = llm_summary[run_orm.id]
+        run_read.usage = (
+            await usage_for_run(service.session, run_orm)
+        ).as_dict()
     return TaskDetail(
         **_to_read(task).model_dump(),
         latest_run=runs[-1] if runs else None,
@@ -69,6 +73,20 @@ async def approve_task(task_id: int, service: Service) -> TaskRead:
 @router.post("/{task_id}/reject", response_model=TaskRead)
 async def reject_task(task_id: int, service: Service) -> TaskRead:
     return TaskRead.model_validate(await service.reject_task(task_id))
+
+
+@router.post(
+    "/{task_id}/duplicate",
+    response_model=TaskRead,
+    status_code=status.HTTP_201_CREATED,
+)
+async def duplicate_task(task_id: int, service: Service) -> TaskRead:
+    """Run a finished task again as a brand-new task.
+
+    Completed tasks stay terminal; this is how a user repeats the work without
+    the finished result becoming ambiguous.
+    """
+    return TaskRead.model_validate(await service.duplicate_task(task_id))
 
 
 @router.post("/{task_id}/cancel", response_model=TaskRead)

@@ -150,6 +150,29 @@ class TaskService:
         await self.queue.enqueue_run_agent(task.id)
         return task
 
+    async def duplicate_task(self, task_id: int) -> Task:
+        """Create a fresh task from a finished one.
+
+        Completed tasks are terminal, so re-running means starting a new one.
+        This copies the request and the model choices, and deliberately copies
+        nothing else: no run history, no workspace, no branch. The original is
+        left exactly as it was.
+        """
+        source = await self.tasks.get(task_id, self.user.id)
+        if source is None:
+            raise NotFoundError(f"Task {task_id} not found")
+
+        return await self.create_task(
+            TaskCreate(
+                project_id=source.project_id,
+                title=source.title,
+                request=source.request,
+                llm_provider=source.llm_provider,
+                llm_model=source.llm_model,
+                execution_profile=source.execution_profile,
+            )
+        )
+
     async def cancel_task(self, task_id: int) -> Task:
         """Ask the worker to stop at its next safe checkpoint.
 

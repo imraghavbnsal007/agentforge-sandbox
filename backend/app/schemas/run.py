@@ -48,6 +48,11 @@ class AgentRunRead(BaseModel):
     # global default) — populated by the tasks route, absent for mock runs.
     llm_provider: str | None = None
     llm_model: str | None = None
+    stage: str | None = None
+    progress: int = 0
+    error_code: str | None = None
+    #: Normalised usage; estimated_cost is null when any call was unpriced.
+    usage: dict | None = None
     started_at: datetime
     finished_at: datetime | None
     file_changes: list[FileChangeRead]
