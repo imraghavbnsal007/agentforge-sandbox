@@ -38,3 +38,27 @@ class TaskDetail(TaskRead):
     latest_run: AgentRunRead | None = None
     # Full run history (oldest first) for the raw-logs debugging view.
     runs: list[AgentRunRead] = []
+
+
+class TaskEventRead(BaseModel):
+    """One recorded event. `id` doubles as the replay cursor."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    task_id: int
+    run_id: int | None = None
+    sequence_number: int
+    event_type: str
+    stage: str | None = None
+    message: str | None = None
+    progress: int | None = None
+    error_code: str | None = None
+    safe_metadata: dict | None = None
+    created_at: datetime
+
+
+class TaskEventPage(BaseModel):
+    events: list[TaskEventRead] = []
+    #: Pass back as `after_id` to continue; None when caught up.
+    next_cursor: int | None = None

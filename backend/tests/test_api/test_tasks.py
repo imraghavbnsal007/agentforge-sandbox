@@ -129,10 +129,15 @@ async def test_get_unknown_task_404(client: AsyncClient) -> None:
 async def test_retry_task_reenqueues(
     client: AsyncClient, session: AsyncSession, task: Task, fake_queue: FakeQueue
 ) -> None:
-    # Simulate a finished (failed or completed) task, then retry it.
+    """A failed task can be retried, producing a fresh run."""
+    from app.core.enums import TaskStatus
+
     await RunService(
         session, runner=MockRunner(delay=0), executor=FakeExecutor()
     ).execute_agent_run(task.id)
+    # Put it in a retryable terminal state.
+    task.status = TaskStatus.failed
+    await session.commit()
 
     response = await client.post(f"/api/v1/tasks/{task.id}/retry")
     assert response.status_code == 200
@@ -140,7 +145,7 @@ async def test_retry_task_reenqueues(
     assert body["status"] == "pending"
     assert fake_queue.enqueued == [task.id]
 
-    # A second run accumulates in the history; detail exposes all runs.
+    # The retry produces a NEW run; the previous one is preserved intact.
     await RunService(
         session, runner=MockRunner(delay=0), executor=FakeExecutor()
     ).execute_agent_run(task.id)
@@ -148,6 +153,24 @@ async def test_retry_task_reenqueues(
     assert len(detail["runs"]) == 2
     assert detail["latest_run"]["id"] == detail["runs"][-1]["id"]
     assert detail["latest_run_mode"] == "mock"
+
+
+async def test_retry_refuses_a_completed_task(
+    client: AsyncClient, session: AsyncSession, task: Task, fake_queue: FakeQueue
+) -> None:
+    """Phase 7: a completed task is terminal. Re-running it means creating a
+    new task, so the finished result is never ambiguous."""
+    from app.core.enums import TaskStatus
+
+    await RunService(
+        session, runner=MockRunner(delay=0), executor=FakeExecutor()
+    ).execute_agent_run(task.id)
+    assert task.status == TaskStatus.completed
+
+    response = await client.post(f"/api/v1/tasks/{task.id}/retry")
+    assert response.status_code == 409
+    assert "cannot be retried" in response.json()["detail"]
+    assert fake_queue.enqueued == []
 
 
 async def test_retry_unknown_task_404(client: AsyncClient) -> None:

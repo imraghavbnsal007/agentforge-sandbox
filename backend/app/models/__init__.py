@@ -8,6 +8,7 @@ from app.models.project_analysis import ProjectAnalysis
 from app.models.repo_file_summary import RepoFileSummary
 from app.models.repo_improvement_suggestion import RepoImprovementSuggestion
 from app.models.task import Task
+from app.models.task_event import TaskEvent
 from app.models.test_result import TestResult
 from app.models.user import User
 from app.models.user_github_installation import UserGitHubInstallation
@@ -24,6 +25,7 @@ __all__ = [
     "RepoFileSummary",
     "RepoImprovementSuggestion",
     "Task",
+    "TaskEvent",
     "TestResult",
     "User",
     "UserGitHubInstallation",

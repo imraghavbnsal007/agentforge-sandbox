@@ -55,6 +55,27 @@ throughout: **generated diffs and task history always survive.**
 workspace path traversal, credential hygiene, CSRF, webhook signatures, and
 that no PAT fallback exists in `github_app` mode.
 
+## Phase 7 suites
+
+**`test_core/test_task_state.py`** — every legal and illegal transition,
+terminal immutability, monotonic progress, and reconciliation.
+
+**`test_services/test_task_events.py`** — allowlist scrubbing, per-run
+sequencing, cursor replay, and that a broadcast failure never sinks the run.
+
+**`test_services/test_execution_lock.py`** — mutual exclusion, lease ownership,
+renewal after expiry, and stale-run detection.
+
+**`test_services/test_run_recovery.py`** — reaping abandoned runs while
+preserving their diffs, and flagging crashed publishes for reconciliation.
+
+**`test_api/test_task_control.py`** — cancel/retry/events/stream at the HTTP
+boundary, including cross-user 404s and that no token reaches the wire.
+
+**Frontend `TaskLivePanel.test.tsx`** — replay, live append, deduplication,
+connection states, SSE→polling fallback, and the cancel/retry controls. jsdom
+has no `EventSource`, so a fake stands in.
+
 ## Writing new tests
 
 - Assert the behaviour, not the implementation.

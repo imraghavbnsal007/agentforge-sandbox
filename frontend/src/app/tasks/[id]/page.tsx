@@ -2,6 +2,7 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import Markdown from "react-markdown";
 import { AutoRefresh } from "@/components/AutoRefresh";
+import { TaskLivePanel } from "@/components/TaskLivePanel";
 import { DiffView } from "@/components/DiffView";
 import { ModeBadge } from "@/components/ModeBadge";
 import { RetryButton } from "@/components/RetryButton";
@@ -51,7 +52,10 @@ export default async function TaskDetailPage({
 
   return (
     <div className="space-y-5">
-      {inProgress && <AutoRefresh intervalMs={2000} />}
+      {/* The live panel streams events and triggers its own refresh when a
+          run reaches a milestone, so blanket polling is only a fallback for
+          the rest of the page. */}
+      {inProgress && <AutoRefresh intervalMs={5000} />}
 
       <div>
         <Link
@@ -83,6 +87,12 @@ export default async function TaskDetailPage({
           {task.runs.length > 1 && ` · ${task.runs.length} runs`}
         </p>
       </div>
+
+      <TaskLivePanel
+        taskId={task.id}
+        status={task.status}
+        startedAt={run?.started_at ?? task.created_at}
+      />
 
       {run?.error && (
         <div className="card border-red-500/30 bg-red-500/[0.06] px-5 py-3 text-sm text-red-300">
