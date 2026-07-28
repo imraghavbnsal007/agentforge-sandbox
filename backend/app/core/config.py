@@ -74,6 +74,15 @@ class Settings(BaseSettings):
     # it, so a long clone/push cannot straddle the boundary.
     installation_token_refresh_margin_seconds: int = 300
 
+    # Shared secret configured on the GitHub App's webhook. Deliveries are
+    # rejected unless their HMAC matches; with no secret set, the endpoint
+    # refuses everything rather than trusting unverifiable payloads.
+    github_app_webhook_secret: str = ""
+    # Failed-signature attempts tolerated per client per window. Valid
+    # deliveries are never counted, so a genuine GitHub burst is not throttled.
+    webhook_rate_limit_requests: int = 60
+    webhook_rate_limit_window_seconds: int = 60
+
     # Commit identity used when publishing through a GitHub App installation.
     # Both are REQUIRED in github_app mode and deliberately have no default:
     # inventing a noreply address would attribute commits to an identity that
@@ -118,6 +127,9 @@ class Settings(BaseSettings):
     def github_app_configured(self) -> bool:
         """Whether installation tokens can be minted at all."""
         return bool(self.github_app_id and self.github_app_private_key_path)
+
+    def webhooks_configured(self) -> bool:
+        return bool(self.github_app_webhook_secret)
 
     def missing_commit_identity_settings(self) -> list[str]:
         """Which commit-identity settings are unset. Empty means usable."""

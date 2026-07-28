@@ -27,6 +27,8 @@ _SENSITIVE_FIELDS = frozenset(
         "session_id",
         "csrf_token",
         "private_key",
+        "signature",
+        "x-hub-signature-256",
     }
 )
 
@@ -39,12 +41,31 @@ SESSION_REJECTED = "auth.session.rejected"
 RATE_LIMITED = "auth.rate_limited"
 CSRF_REJECTED = "auth.csrf.rejected"
 
+# Webhook events.
+WEBHOOK_RECEIVED = "github.webhook.received"
+WEBHOOK_REJECTED = "github.webhook.rejected"
+WEBHOOK_DUPLICATE = "github.webhook.duplicate"
+WEBHOOK_PROCESSED = "github.webhook.processed"
+WEBHOOK_IGNORED = "github.webhook.ignored"
+WEBHOOK_FAILED = "github.webhook.failed"
+INSTALLATION_REVOKED = "github.installation.revoked"
+INSTALLATION_UNSUSPENDED = "github.installation.unsuspended"
+REPOSITORIES_ADDED = "github.repositories.added"
+REPOSITORIES_REMOVED = "github.repositories.removed"
 
-def audit(event: str, **fields: Any) -> None:
+
+def audit(event_name: str, **fields: Any) -> None:
+    """Record one audit event.
+
+    The first parameter is `event_name`, not `event`, so callers can pass a
+    field literally named `event` (webhooks carry a GitHub event type).
+    """
     safe = {
         key: value
         for key, value in fields.items()
         if key.lower() not in _SENSITIVE_FIELDS and value is not None
     }
     detail = " ".join(f"{key}={value!r}" for key, value in sorted(safe.items()))
-    logger.info("%s %s", event, detail, extra={"audit_event": event, **safe})
+    logger.info(
+        "%s %s", event_name, detail, extra={"audit_event": event_name, **safe}
+    )

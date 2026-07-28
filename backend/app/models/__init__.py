@@ -11,6 +11,7 @@ from app.models.task import Task
 from app.models.test_result import TestResult
 from app.models.user import User
 from app.models.user_github_installation import UserGitHubInstallation
+from app.models.webhook_delivery import WebhookDelivery
 
 __all__ = [
     "AgentRun",
@@ -26,4 +27,5 @@ __all__ = [
     "TestResult",
     "User",
     "UserGitHubInstallation",
+    "WebhookDelivery",
 ]

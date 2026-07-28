@@ -11,6 +11,7 @@ from app.api.deps import require_user
 from app.api.routes import (
     auth,
     github_app,
+    github_webhooks,
     health,
     llm,
     meta,
@@ -153,6 +154,11 @@ def create_app(with_lifespan: bool = True) -> FastAPI:
     app.include_router(health.router)
     app.include_router(meta.router)
     app.include_router(auth.router)
+    # Webhooks authenticate by HMAC signature, not by session — GitHub has no
+    # cookie. Deliberately NOT added to CSRF_EXEMPT_PREFIXES: GitHub sends no
+    # cookies so CSRF never fires, and a browser-with-session POST here should
+    # still be blocked.
+    app.include_router(github_webhooks.router)
 
     # Everything that exposes user data requires a session. In local mode
     # require_user always resolves the default local user, so these behave
