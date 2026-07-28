@@ -45,9 +45,20 @@ class FakeGit:
 
 
 class FakeAPI:
-    async def create_pull_request(self, owner, repo, head, base, title, body) -> str:
-        self.created = {"owner": owner, "repo": repo, "head": head, "base": base}
+    async def create_pull_request(
+        self, owner, repo, head, base, title, body, token=""
+    ) -> str:
+        self.created = {
+            "owner": owner,
+            "repo": repo,
+            "head": head,
+            "base": base,
+            "token": token,
+        }
         return f"https://github.com/{owner}/{repo}/pull/1"
+
+    async def find_pull_request(self, owner, repo, head_branch, token) -> str | None:
+        return None
 
 
 async def _make_github_task(session: AsyncSession, status: TaskStatus) -> Task:

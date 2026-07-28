@@ -26,6 +26,10 @@ def parse_github_url(url: str) -> tuple[str, str]:
 
 
 def check_repo_allowed(owner: str, repo: str) -> None:
+    """Allowlist gate. Local mode only — in github_app mode the installation
+    grant is the allowlist."""
+    if settings.is_github_app_mode():
+        return
     allowed = settings.allowed_repos()
     full_name = f"{owner}/{repo}"
     if allowed is not None and full_name not in allowed:
@@ -45,11 +49,18 @@ def validate_github_project(project: Project) -> None:
             f"Project {project.name!r} is not GitHub-configured "
             "(repo_url, github_owner and github_repo are all required)"
         )
-    if not settings.github_token:
+    # The shared PAT is a local-mode concept. In github_app mode credentials
+    # come from the project's installation, so demanding a PAT here would
+    # break every App-backed operation.
+    if not settings.is_github_app_mode() and not settings.github_token:
         raise PublishError(
             "GITHUB_TOKEN is not set — required to publish pull requests. "
             "Add it to .env and restart the backend and worker."
         )
+    # In github_app mode the installation grant *is* the allowlist, enforced
+    # by GitHubCredentialResolver against live installation state.
+    if settings.is_github_app_mode():
+        return
     allowed = settings.allowed_repos()
     full_name = f"{project.github_owner}/{project.github_repo}"
     if allowed is not None and full_name not in allowed:
