@@ -50,6 +50,10 @@ class Settings(BaseSettings):
     # transitions are observable in the UI. Tests set this to 0.
     agent_step_delay: float = 1.5
 
+    # "development" or "production". Production enables strict startup
+    # checks that reject cookie/CORS defaults which are fine locally.
+    app_env: str = "development"
+
     # --- Authentication (Phase 6A) ----------------------------------------
     # local      -> no sign-in; every request resolves to the default local
     #               user, preserving the single-user PAT workflow.

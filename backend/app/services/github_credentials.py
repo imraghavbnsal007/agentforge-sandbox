@@ -25,6 +25,7 @@ from app.models import (
     GitHubInstallation,
     GitHubInstallationRepository,
     Project,
+    UserGitHubInstallation,
 )
 from app.services.github_app_auth import GitHubAppConfigError
 from app.services.installation_service import (
@@ -215,6 +216,22 @@ class GitHubCredentialResolver:
                 if installation.is_suspended
                 else "installation_revoked"
             ) from None
+
+        # 3b. The project's OWNER must still be linked to this installation.
+        #     Installation liveness alone is not enough: an installation can
+        #     stay active for an organisation while one member's access is
+        #     withdrawn. Without this, that member's existing projects would
+        #     keep minting tokens. This is also the check that gives the
+        #     worker path real authorisation — there the user_id comparison
+        #     above is a tautology, because the owner is derived from the row.
+        link = await self.session.execute(
+            select(UserGitHubInstallation.id).where(
+                UserGitHubInstallation.user_id == project.user_id,
+                UserGitHubInstallation.installation_id == installation.id,
+            )
+        )
+        if link.scalar_one_or_none() is None:
+            raise deny("owner_not_linked_to_installation")
 
         # 4. Repository grant. The cache is a fast pre-check only — it can
         #    refuse, but the token exchange below is what actually authorises.

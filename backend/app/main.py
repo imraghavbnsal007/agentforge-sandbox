@@ -36,6 +36,7 @@ from app.core.security import (
     csrf_token_matches,
     read_session_cookie,
 )
+from app.core.startup_checks import enforce_configuration
 from app.services.kv_store import InMemoryKVStore, RedisKVStore
 from app.services.session_store import SessionStore
 
@@ -59,6 +60,9 @@ def _validate_cors_config() -> list[str]:
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    # Refuse to boot a misconfigured deployment rather than failing at the
+    # first user request. Local mode requires no GitHub App settings.
+    enforce_configuration()
     app.state.arq_pool = await create_pool(RedisSettings.from_dsn(settings.redis_url))
     # Sessions, OAuth state and rate limits share one Redis client, separate
     # from the arq job queue's pool.
