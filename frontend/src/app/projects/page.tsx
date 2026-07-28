@@ -1,7 +1,10 @@
 import { AutoRefresh } from "@/components/AutoRefresh";
 import { ProjectCard } from "@/components/ProjectCard";
 import { RegisterRepoForm } from "@/components/RegisterRepoForm";
-import { getProjects, getTasks, type Task } from "@/lib/api";
+import { RepoPicker } from "@/components/RepoPicker";
+import { getProjects, getRepositories, getTasks, type Task } from "@/lib/api";
+import { EMPTY_REPOSITORY_LIST, type RepositoryList } from "@/lib/repositories";
+import { getAuthStatus } from "@/lib/session";
 
 export const dynamic = "force-dynamic";
 
@@ -16,10 +19,17 @@ const OPEN_STATUSES = new Set([
 ]);
 
 export default async function ProjectsPage() {
-  const [projects, tasks] = await Promise.all([
+  const [projects, tasks, auth] = await Promise.all([
     getProjects(),
     getTasks().catch((): Task[] => []),
+    getAuthStatus(),
   ]);
+  const githubAppMode = auth.auth_mode === "github_app";
+  // Discovery only exists in github_app mode; a failure here must not take
+  // the whole page down, so it degrades to the install prompt.
+  const repositories: RepositoryList = githubAppMode
+    ? await getRepositories().catch(() => EMPTY_REPOSITORY_LIST)
+    : EMPTY_REPOSITORY_LIST;
   const anyActive = projects.some(
     (p) => p.analysis_status === "pending" || p.analysis_status === "running",
   );
@@ -41,12 +51,17 @@ export default async function ProjectsPage() {
         </p>
       </div>
 
-      <RegisterRepoForm />
+      {githubAppMode ? (
+        <RepoPicker initial={repositories} />
+      ) : (
+        <RegisterRepoForm />
+      )}
 
       {projects.length === 0 ? (
         <div className="card border-dashed p-12 text-center text-sm text-ink-dim">
-          No projects yet — register a repository above or run{" "}
-          <code className="rounded bg-surface-3 px-1.5 py-0.5 text-xs">make seed</code>.
+          {githubAppMode
+            ? "No projects yet — register one of your granted repositories above."
+            : "No projects yet — register a repository above."}
         </div>
       ) : (
         <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
