@@ -73,7 +73,12 @@ class GitHubPublisher:
         # An injected client keeps its own credentials (tests); otherwise one
         # is built per operation from freshly resolved credentials.
         self._injected_git = git
-        self.git = git or GitClient(token=settings.github_token)
+        # In github_app mode there is no PAT to fall back on, so the default
+        # client carries no credential at all: every operation must build one
+        # from freshly resolved credentials or fail.
+        self.git = git or GitClient(
+            token="" if settings.is_github_app_mode() else settings.github_token
+        )
         self.api = api or GitHubAPI()
         self.resolver = resolver
         # None means "skip verification"; the default is pytest.
@@ -213,6 +218,11 @@ class GitHubPublisher:
             "\n\n---\n*Opened by AgentForge from an approved agent run.*"
         )
         credentials = await self._credentials(project, RepoOperation.pull_request)
+        if credentials is None and settings.is_github_app_mode():
+            raise RepositoryAccessError(
+                "GitHub App access to this repository is no longer available. "
+                "Reinstall or update repository access."
+            )
         token = credentials.token if credentials else settings.github_token
         try:
             pr_url = await self.api.create_pull_request(

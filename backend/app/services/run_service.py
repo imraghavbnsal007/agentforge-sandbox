@@ -54,7 +54,15 @@ async def build_git_client(
 ) -> GitClient:
     """A git client carrying freshly resolved credentials for one operation."""
     if session is None:
-        # No session (older injected call sites): local mode only.
+        # No session means no way to resolve an installation credential. In
+        # github_app mode that must abort, never silently reach for the PAT.
+        if settings.is_github_app_mode():
+            from app.services.github_credentials import RepositoryAccessError
+
+            raise RepositoryAccessError(
+                "GitHub App access to this repository is no longer available. "
+                "Reinstall or update repository access."
+            )
         return GitClient(
             token=settings.github_token,
             committer_name=settings.local_commit_name,

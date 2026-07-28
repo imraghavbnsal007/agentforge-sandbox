@@ -22,6 +22,14 @@ async def analyze_project(ctx: dict, analysis_id: int) -> None:
         await AnalysisService(session).run_analysis(analysis_id)
 
 
+async def _startup(ctx: dict) -> None:
+    """Fail fast on a misconfigured worker, exactly as the API does."""
+    from app.core.startup_checks import enforce_configuration
+
+    enforce_configuration()
+
+
 class WorkerSettings:
     functions = [run_agent, publish_task, analyze_project]
     redis_settings = RedisSettings.from_dsn(settings.redis_url)
+    on_startup = _startup
