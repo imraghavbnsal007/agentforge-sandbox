@@ -255,3 +255,76 @@ async def test_publish_skipped_unless_publishing(session: AsyncSession):
     task = await _make_github_task(session, TaskStatus.ready_for_review)
     await PublishService(session, publisher=GitHubPublisher(FakeGit(), FakeAPI())).publish_task(task.id)
     assert task.status == TaskStatus.ready_for_review  # untouched
+
+
+# -- deleting an empty file --------------------------------------------------
+#
+# A zero-byte file has no lines to remove, so its deletion diff is empty, and
+# `git apply` answers empty input with "No valid patches in input". Run 18
+# (2026-07-29) cleaned a Gradle cache containing two empty gc.properties files
+# and could not be published because of them.
+
+
+async def test_publish_deletes_an_empty_file_without_patching(
+    session: AsyncSession, monkeypatch: pytest.MonkeyPatch
+):
+    from app.repositories.task_repo import TaskRepository
+
+    monkeypatch.setattr(settings, "github_token", "tok")
+    task = await _make_github_task(session, TaskStatus.publishing)
+    task = await TaskRepository(session).get_with_runs_unscoped_for_worker(task.id)
+    run = task.runs[-1]
+    run.file_changes.append(
+        FileChange(
+            path=".gradle/gc.properties",
+            change_type="delete",
+            diff="",
+            is_binary=False,
+        )
+    )
+    await session.commit()
+
+    git, api = FakeGit(), FakeAPI()
+    publisher = GitHubPublisher(git=git, api=api, executor=FakeExecutor())
+    await PublishService(session, publisher=publisher).publish_task(task.id)
+
+    task = await TaskRepository(session).get_with_runs_unscoped_for_worker(task.id)
+    assert task.status == TaskStatus.completed
+    assert ".gradle/gc.properties" in git.deleted
+    # Nothing empty was ever handed to git apply.
+    assert all(d.strip() for d in git.applied)
+
+
+async def test_publish_removes_deleted_files_without_patching(
+    session: AsyncSession, monkeypatch: pytest.MonkeyPatch
+):
+    """Deletions go through `git rm` even when a usable diff exists.
+
+    Reproducing a deletion as a patch adds a content check that earns little
+    for a file being removed, while inheriting every way a patch can fail to
+    apply — line endings, undecodable bytes, an empty file with no hunks.
+    """
+    from app.repositories.task_repo import TaskRepository
+
+    monkeypatch.setattr(settings, "github_token", "tok")
+    task = await _make_github_task(session, TaskStatus.publishing)
+    task = await TaskRepository(session).get_with_runs_unscoped_for_worker(task.id)
+    run = task.runs[-1]
+    run.file_changes.append(
+        FileChange(
+            path=".idea/WeatherApp.iml",
+            change_type="delete",
+            diff="--- a/.idea/WeatherApp.iml\n+++ /dev/null\n@@ -1,1 +0,0 @@\n-<module/>\n",
+            is_binary=False,
+        )
+    )
+    await session.commit()
+
+    git, api = FakeGit(), FakeAPI()
+    publisher = GitHubPublisher(git=git, api=api, executor=FakeExecutor())
+    await PublishService(session, publisher=publisher).publish_task(task.id)
+
+    task = await TaskRepository(session).get_with_runs_unscoped_for_worker(task.id)
+    assert task.status == TaskStatus.completed
+    assert ".idea/WeatherApp.iml" in git.deleted
+    assert not any(".iml" in d for d in git.applied)

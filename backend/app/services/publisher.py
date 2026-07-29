@@ -192,13 +192,26 @@ class GitHubPublisher:
             log(f"created branch {branch}")
 
             for change in run.file_changes:
+                if change.change_type == ChangeType.delete:
+                    # A deletion carries nothing a patch is needed for, and
+                    # reproducing it as one is fragile in ways that have
+                    # nothing to do with the deletion: an empty file has no
+                    # hunks at all ("No valid patches in input"), and any file
+                    # whose bytes we could not reproduce exactly — unusual
+                    # line endings, undecodable characters — fails to apply.
+                    # Removing it directly cannot fail for those reasons, and
+                    # it is how binary deletions have always been handled.
+                    #
+                    # The trade-off is losing git apply's check that the file
+                    # still looks as it did during the run. For a file being
+                    # removed outright that check earns little, and `git rm`
+                    # still fails loudly if it has already gone.
+                    await git.delete_path(clone_dir, change.path)
+                    log(f"removed: {change.path}")
+                    continue
                 if change.is_binary:
-                    # Binary contents are not stored, so only deletions can be
-                    # reproduced at publish time.
-                    if change.change_type == ChangeType.delete:
-                        await git.delete_path(clone_dir, change.path)
-                        log(f"removed binary file: {change.path}")
-                        continue
+                    # Binary contents are not stored, so nothing but a
+                    # deletion can be reproduced at publish time.
                     raise PublishError(
                         f"Run {change.change_type}s binary file {change.path!r}; "
                         "binary contents are not stored and cannot be published. "
