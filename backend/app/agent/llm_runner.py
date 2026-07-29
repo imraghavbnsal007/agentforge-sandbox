@@ -2,15 +2,31 @@
 edits the workspace through the neutral tool-use loop. No provider SDK is
 imported here — everything goes through LLMService."""
 
+import json
+
 from app.agent.executor import TestResultData
-from app.agent.runner import LogFn
+from app.agent.runner import EditOutcome, LogFn
 from app.agent.workspace import FileChangeData, Workspace, WorkspaceError
 from app.core.enums import AgentMode
 from app.llm.profiles import ModelSpec
 from app.llm.service import LLMService
-from app.llm.types import LLMProviderError, Message, text_message
+from app.llm.types import Message, text_message
 
-MAX_EDIT_ITERATIONS = 20
+#: Hard ceiling, to stop a genuine runaway — a backstop, not a work budget.
+#: The old limit of 20 looked like a budget but was really a cap on
+#: *operations*, because a model that emits one tool call per turn gets one
+#: edit per turn while a model that batches gets ten. Same nominal number,
+#: an order of magnitude apart in what it buys. Spinning is now detected
+#: directly, so this only has to be high enough not to bind on real work.
+MAX_EDIT_TURNS = 80
+
+#: Consecutive turns in which every call repeats one already made, argument
+#: for argument. Such a turn changed nothing and learned nothing. Two in a
+#: row is a model finding its footing; this many is a loop, and waiting for
+#: the turn ceiling would burn another seventy turns to reach the same
+#: conclusion — slowly, and at the user's expense.
+MAX_SPINNING_TURNS = 3
+
 MAX_TOKENS = 16000
 # Repo is tiny; guard against pathological content in prompts anyway.
 MAX_CONTEXT_CHARS = 60_000
@@ -105,6 +121,15 @@ SYSTEM_PROMPT = (
 )
 
 
+def _call_signature(call) -> str:
+    """Identity of a tool call: same name and same arguments, same effect.
+
+    Content is part of it on purpose — writing a file the same way twice is
+    genuinely a repeat, and that is the shape most edit loops go round in.
+    """
+    return f"{call.name}:{json.dumps(call.input, sort_keys=True, default=str)}"
+
+
 def _repo_context(workspace: Workspace) -> str:
     parts = []
     total = 0
@@ -145,7 +170,7 @@ class LLMRunner:
         plan: list[str],
         workspace: Workspace,
         log: LogFn,
-    ) -> None:
+    ) -> EditOutcome:
         spec = self.specs["coding"]
         plan_text = "\n".join(f"{i + 1}. {s}" for i, s in enumerate(plan))
         messages: list[Message] = [
@@ -161,7 +186,11 @@ class LLMRunner:
             )
         ]
 
-        for _ in range(MAX_EDIT_ITERATIONS):
+        seen_calls: set[str] = set()
+        spinning = 0
+        turns = 0
+
+        for turns in range(1, MAX_EDIT_TURNS + 1):
             response = await self.service.chat(
                 spec,
                 "coding",
@@ -172,7 +201,7 @@ class LLMRunner:
             )
             if response.stop_reason != "tool_use" or not response.tool_calls:
                 log(f"agent: {response.text.strip() or 'finished editing'}")
-                return
+                return EditOutcome.finished(turns)
 
             assistant_blocks: list[dict] = []
             if response.text:
@@ -207,9 +236,32 @@ class LLMRunner:
                 )
             messages.append({"role": "user", "content": result_blocks})
 
-        raise LLMProviderError(
-            f"Edit loop exceeded {MAX_EDIT_ITERATIONS} iterations"
+            signatures = [_call_signature(call) for call in response.tool_calls]
+            if all(signature in seen_calls for signature in signatures):
+                spinning += 1
+                if spinning >= MAX_SPINNING_TURNS:
+                    return self._stop(
+                        log,
+                        turns,
+                        f"the model repeated the same tool call(s) for "
+                        f"{spinning} turns running without changing anything",
+                    )
+            else:
+                spinning = 0
+            seen_calls.update(signatures)
+
+        return self._stop(
+            log, turns, f"the {MAX_EDIT_TURNS}-turn limit was reached"
         )
+
+    @staticmethod
+    def _stop(log: LogFn, turns: int, why: str) -> EditOutcome:
+        reason = (
+            f"The agent stopped after {turns} turns because {why}. "
+            "The changes it did make are included below and may be incomplete."
+        )
+        log(f"agent: stopping — {why}")
+        return EditOutcome.stopped(reason, turns)
 
     def _run_tool(
         self, name: str, tool_input: dict, workspace: Workspace, log: LogFn

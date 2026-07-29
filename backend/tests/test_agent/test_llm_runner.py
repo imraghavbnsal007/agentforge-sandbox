@@ -4,7 +4,12 @@ import pytest
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.agent.llm_runner import LLMRunner, _repo_context
+from app.agent.llm_runner import (
+    MAX_EDIT_TURNS,
+    MAX_SPINNING_TURNS,
+    LLMRunner,
+    _repo_context,
+)
 from app.agent.workspace import Workspace
 from app.core.config import settings
 from app.llm import service as service_module
@@ -108,11 +113,117 @@ async def test_tool_error_reported_to_model(session: AsyncSession, workspace: Wo
     assert result_block["is_error"] is True
 
 
-async def test_iteration_cap(session: AsyncSession, workspace: Workspace):
-    endless = [tool_response(("list_files", {})) for _ in range(25)]
-    runner, _ = make_runner(session, endless)
-    with pytest.raises(LLMProviderError, match="Edit loop exceeded"):
-        await runner.apply_changes("T", "R", ["s"], workspace, lambda _m: None)
+# -- when the agent does not finish by itself -------------------------------
+#
+# Running out of turns used to raise, which discarded every edit the run had
+# made. It is not a failure: the workspace holds real work, and the run now
+# carries a warning through to the diff, the tests and the pull request body.
+
+
+async def test_a_finished_loop_reports_itself_complete(
+    session: AsyncSession, workspace: Workspace
+):
+    runner, _ = make_runner(
+        session,
+        [tool_response(("list_files", {})), text_response("done")],
+    )
+    outcome = await runner.apply_changes("T", "R", ["s"], workspace, lambda _m: None)
+    assert outcome.complete
+    assert outcome.turns == 2
+
+
+async def test_a_model_going_in_circles_is_stopped_early(
+    session: AsyncSession, workspace: Workspace
+):
+    """Repeating the same call proves nothing is being learned or changed.
+
+    Waiting for the turn ceiling would burn another seventy calls to reach
+    the same conclusion, slowly and at the user's expense.
+    """
+    endless = [tool_response(("list_files", {})) for _ in range(MAX_EDIT_TURNS)]
+    runner, provider = make_runner(session, endless)
+
+    outcome = await runner.apply_changes("T", "R", ["s"], workspace, lambda _m: None)
+
+    assert not outcome.complete
+    assert "repeated the same tool call" in outcome.reason
+    # First turn is novel, then MAX_SPINNING_TURNS repeats.
+    assert outcome.turns == MAX_SPINNING_TURNS + 1
+    assert len(provider.calls) == MAX_SPINNING_TURNS + 1
+
+
+async def test_varied_work_is_never_mistaken_for_spinning(
+    session: AsyncSession, workspace: Workspace
+):
+    """The stall detector must not cut short an agent doing real work."""
+    responses = [
+        tool_response(("write_file", {"path": f"f{i}.py", "content": f"# {i}\n"}))
+        for i in range(MAX_SPINNING_TURNS + 3)
+    ]
+    responses.append(text_response("done"))
+    runner, _ = make_runner(session, responses)
+
+    outcome = await runner.apply_changes("T", "R", ["s"], workspace, lambda _m: None)
+
+    assert outcome.complete
+    assert (workspace.root / f"f{MAX_SPINNING_TURNS + 2}.py").exists()
+
+
+async def test_a_repeat_after_real_work_does_not_count_toward_a_stall(
+    session: AsyncSession, workspace: Workspace
+):
+    """Re-reading a file between edits is normal, not a loop."""
+    read = tool_response(("read_file", {"path": "calculator.py"}))
+    responses = [
+        read,
+        tool_response(("write_file", {"path": "a.py", "content": "# a\n"})),
+        read,
+        tool_response(("write_file", {"path": "b.py", "content": "# b\n"})),
+        read,
+        text_response("done"),
+    ]
+    runner, _ = make_runner(session, responses)
+
+    outcome = await runner.apply_changes("T", "R", ["s"], workspace, lambda _m: None)
+    assert outcome.complete
+
+
+async def test_the_turn_ceiling_stops_rather_than_raises(
+    session: AsyncSession, workspace: Workspace
+):
+    """A model that keeps doing genuinely new things still has a backstop."""
+    responses = [
+        tool_response(("write_file", {"path": f"f{i}.py", "content": f"# {i}\n"}))
+        for i in range(MAX_EDIT_TURNS + 5)
+    ]
+    runner, _ = make_runner(session, responses)
+
+    outcome = await runner.apply_changes("T", "R", ["s"], workspace, lambda _m: None)
+
+    assert not outcome.complete
+    assert f"{MAX_EDIT_TURNS}-turn limit" in outcome.reason
+    assert outcome.turns == MAX_EDIT_TURNS
+
+
+async def test_the_edits_made_before_stopping_survive(
+    session: AsyncSession, workspace: Workspace
+):
+    """The whole point of not raising: the work is still there."""
+    stuck = tool_response(("list_files", {}))
+    responses = [
+        tool_response(("write_file", {"path": "kept.py", "content": "# kept\n"})),
+        stuck,
+        stuck,
+        stuck,
+        stuck,
+    ]
+    runner, _ = make_runner(session, responses)
+
+    outcome = await runner.apply_changes("T", "R", ["s"], workspace, lambda _m: None)
+
+    assert not outcome.complete
+    assert (workspace.root / "kept.py").read_text() == "# kept\n"
+    assert "kept.py" in {c.path for c in workspace.compute_changes()}
 
 
 async def test_summarize_includes_binary_note(session: AsyncSession, workspace: Workspace):

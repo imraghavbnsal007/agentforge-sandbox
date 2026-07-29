@@ -1,3 +1,4 @@
+from dataclasses import dataclass
 from typing import Callable, Protocol
 
 from app.agent.executor import TestResultData
@@ -6,6 +7,30 @@ from app.core.enums import AgentMode
 
 # Callback the runner uses to append lines to the run's execution log.
 LogFn = Callable[[str], None]
+
+
+@dataclass(frozen=True)
+class EditOutcome:
+    """How the edit loop ended.
+
+    `complete` is False when the agent ran out of turns or started going in
+    circles. That is deliberately **not** a failure: the workspace still
+    holds everything it did manage, and throwing that away — which is what
+    raising used to do — was worse than handing it over with a warning
+    attached. The run continues to diff, test and summarise as normal.
+    """
+
+    complete: bool
+    reason: str = ""
+    turns: int = 0
+
+    @classmethod
+    def finished(cls, turns: int = 0) -> "EditOutcome":
+        return cls(complete=True, turns=turns)
+
+    @classmethod
+    def stopped(cls, reason: str, turns: int) -> "EditOutcome":
+        return cls(complete=False, reason=reason, turns=turns)
 
 
 class AgentRunner(Protocol):
@@ -28,7 +53,7 @@ class AgentRunner(Protocol):
         plan: list[str],
         workspace: Workspace,
         log: LogFn,
-    ) -> None: ...
+    ) -> EditOutcome: ...
 
     async def summarize(
         self,
