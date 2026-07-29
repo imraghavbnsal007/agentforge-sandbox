@@ -1,4 +1,5 @@
 import { AutoRefresh } from "@/components/AutoRefresh";
+import { InstallNotice } from "@/components/InstallNotice";
 import { ProjectCard } from "@/components/ProjectCard";
 import { RegisterRepoForm } from "@/components/RegisterRepoForm";
 import { RepoPicker } from "@/components/RepoPicker";
@@ -18,12 +19,20 @@ const OPEN_STATUSES = new Set([
   "publishing",
 ]);
 
-export default async function ProjectsPage() {
-  const [projects, tasks, auth] = await Promise.all([
+export default async function ProjectsPage({
+  searchParams,
+}: {
+  // Set by the GitHub App install round trip when it ends in something the
+  // user needs to know about.
+  searchParams: Promise<{ install_error?: string; install_pending?: string }>;
+}) {
+  const [params, projects, tasks, auth] = await Promise.all([
+    searchParams,
     getProjects(),
     getTasks().catch((): Task[] => []),
     getAuthStatus(),
   ]);
+  const noticeCode = params.install_pending ? "pending" : params.install_error;
   const githubAppMode = auth.auth_mode === "github_app";
   // Discovery only exists in github_app mode; a failure here must not take
   // the whole page down, so it degrades to the install prompt.
@@ -50,6 +59,8 @@ export default async function ProjectsPage() {
           Registered repositories and what AgentForge knows about them
         </p>
       </div>
+
+      <InstallNotice code={noticeCode} />
 
       {githubAppMode ? (
         <RepoPicker initial={repositories} />

@@ -22,3 +22,7 @@ backups/*.sql
 *.pem
 secrets/*
 !secrets/.gitkeep
+
+# Backups written by scripts/setup_github_app.sh — these contain the App
+# client secret and webhook secret, so they must never be committed.
+.env.backup-*

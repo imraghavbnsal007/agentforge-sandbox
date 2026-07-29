@@ -69,6 +69,24 @@ def test_workers_heartbeat_far_more_often_than_the_staleness_window():
     assert HEARTBEAT_SECONDS * 4 <= STALE_AFTER_SECONDS
 
 
+# -- the job timeout --------------------------------------------------------
+
+
+def test_the_job_timeout_is_set_explicitly():
+    """arq defaults to 300s. Inheriting that cancelled any agent run whose
+    model took longer than five minutes, with a bare TimeoutError that said
+    nothing about what the run was doing."""
+    assert getattr(WorkerSettings, "job_timeout", None) is not None
+
+
+def test_the_job_timeout_leaves_room_for_a_slow_model():
+    """A cheap model doing one small edit per turn is slow, not broken."""
+    assert WorkerSettings.job_timeout > 300
+    # And long enough that the reaper, not the timeout, is what notices a
+    # genuinely wedged run.
+    assert WorkerSettings.job_timeout > STALE_AFTER_SECONDS
+
+
 # -- only genuinely stale runs are touched ---------------------------------
 
 

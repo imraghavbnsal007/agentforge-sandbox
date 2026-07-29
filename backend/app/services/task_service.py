@@ -150,6 +150,38 @@ class TaskService:
         await self.queue.enqueue_run_agent(task.id)
         return task
 
+    async def delete_task(self, task_id: int) -> None:
+        """Remove a task and everything generated for it.
+
+        Hard delete, deliberately. The database already cascades exactly the
+        right way: file changes, test results and events go with their runs,
+        while `llm_runs.agent_run_id` is ON DELETE SET NULL — so the usage and
+        cost record survives with its project and price intact and the Usage
+        page stays accurate. Soft deletion would buy nothing here and would
+        add a `deleted_at` filter to every query, which is a leak waiting to
+        happen in a multi-user system.
+
+        Nothing on GitHub is touched. A pull request this task opened stays
+        open, and the repository is untouched — AgentForge only ever deletes
+        its own record of the work.
+
+        Workspaces need no cleanup: they are temporary directories removed at
+        the end of each run.
+        """
+        task = await self.tasks.get_with_runs(task_id, self.user.id)
+        if task is None:
+            raise NotFoundError(f"Task {task_id} not found")
+
+        # Refuse while a worker still holds it. Deleting mid-run would leave
+        # that worker writing to rows that no longer exist.
+        if any(r.status == RunStatus.running for r in task.runs):
+            raise ConflictError(
+                "This task is still running. Cancel it first, then delete."
+            )
+
+        await self.session.delete(task)
+        await self.session.commit()
+
     async def duplicate_task(self, task_id: int) -> Task:
         """Create a fresh task from a finished one.
 

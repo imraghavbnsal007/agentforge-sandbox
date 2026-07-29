@@ -78,6 +78,11 @@ class Settings(BaseSettings):
     # it, so a long clone/push cannot straddle the boundary.
     installation_token_refresh_margin_seconds: int = 300
 
+    # Hard ceiling on one queued job. arq's own default is 300s, which kills
+    # any agent run that talks to a slow model for more than five minutes —
+    # so this is set explicitly rather than inherited.
+    worker_job_timeout_seconds: int = 3600
+
     # Shared secret configured on the GitHub App's webhook. Deliveries are
     # rejected unless their HMAC matches; with no secret set, the endpoint
     # refuses everything rather than trusting unverifiable payloads.

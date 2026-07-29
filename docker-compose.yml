@@ -86,6 +86,9 @@ services:
     volumes:
       - ./backend:/app
       - ./sample_repo:/sample_repo:ro
+      # The worker mints installation tokens for clone/push/PR, so it needs
+      # the GitHub App private key exactly as the backend does.
+      - ./secrets:/run/secrets:ro
     depends_on:
       postgres:
         condition: service_healthy

@@ -27,6 +27,7 @@ from app.core.enums import RunStage, TaskEventType
 from app.core.enums import ErrorCode
 from app.core.error_codes import classify, describe
 from app.core.task_state import assert_transition, is_terminal_task, reconcile
+from app.services.run_heartbeat import RunHeartbeat
 from app.services.run_progress import RunCancelled, RunTracker
 
 logger = logging.getLogger(__name__)
@@ -186,6 +187,11 @@ class RunService:
             run.log = "\n".join(log_lines)
 
         workspace: Workspace | None = None
+        # Generation is one stage that can run for many minutes, and stage
+        # boundaries are the only other thing that beats. Without this the
+        # reaper declares a healthy run dead partway through it.
+        heartbeat = RunHeartbeat(tracker)
+        await heartbeat.start()
         try:
             runner = self._runner or self._build_runner(task, project, run)
             # Fallback notices ("... unavailable; continued with ...") from
@@ -370,6 +376,8 @@ class RunService:
         except RunCancelled:
             # Not a failure: stop cleanly and keep everything produced so far.
             await self.session.rollback()
+            # The rollback expired every instance; the lines below read them.
+            await tracker.reload()
             log("run cancelled by request")
             await tracker.fail(
                 RunStatus.cancelled,
@@ -396,6 +404,11 @@ class RunService:
             logger.exception("Agent run failed for task %s", task_id)
             # A flush error leaves the session unusable until rolled back.
             await self.session.rollback()
+            # ...but the rollback also expires every instance, so reading
+            # run.progress below would lazy-load and raise MissingGreenlet —
+            # losing the real error and leaving the run stuck in `running`
+            # for the reaper to mislabel. Refresh before touching anything.
+            await tracker.reload()
             log(f"run failed: {exc}")
             code = classify(exc)
             await tracker.fail(RunStatus.failed, RunStage.failed, code, str(exc))
@@ -410,6 +423,7 @@ class RunService:
                 error_code=code,
             )
         finally:
+            await heartbeat.stop()
             if workspace is not None:
                 workspace.cleanup()
 

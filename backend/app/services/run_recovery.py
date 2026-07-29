@@ -29,9 +29,22 @@ from app.core.enums import (
 )
 from app.core.task_state import assert_transition, can_transition
 from app.models import AgentRun, Project, Task
-from app.services.execution_lock import is_stale
+from app.services.execution_lock import STALE_AFTER_SECONDS, is_stale
 
 logger = logging.getLogger(__name__)
+
+#: What the reaper can honestly say. A stale heartbeat proves the run stopped
+#: reporting — not *why*. Claiming "the worker stopped" was wrong often enough
+#: to matter: a run that crashed while recording its own failure looks
+#: identical from here, and that message sent people hunting for a dead
+#: container that was never dead. Point at the log instead.
+STALE_RUN_MESSAGE = (
+    f"This run stopped reporting progress for over "
+    f"{STALE_AFTER_SECONDS // 60} minutes and was marked inactive. It may "
+    "have crashed, lost its connection, or failed while recording its own "
+    "error — the worker log has the details. Anything it produced has been "
+    "preserved."
+)
 
 
 async def find_stale_runs(session: AsyncSession) -> list[AgentRun]:
@@ -55,10 +68,7 @@ async def reap_stale_runs(session: AsyncSession, events=None) -> int:
         run.stage = RunStage.failed
         run.finished_at = now
         run.error_code = ErrorCode.worker_interrupted
-        run.error = (
-            "The worker stopped before this run finished. Any changes "
-            "produced before the interruption have been preserved."
-        )
+        run.error = STALE_RUN_MESSAGE
 
         task = await session.get(Task, run.task_id)
         if task is None:
@@ -86,8 +96,8 @@ async def reap_stale_runs(session: AsyncSession, events=None) -> int:
                     user_id=project.user_id if project else 0,
                     stage=RunStage.failed,
                     message=(
-                        "The worker stopped before this run finished. Retry to "
-                        "start a fresh run."
+                        "This run stopped reporting progress and was marked "
+                        "inactive. Retry to start a fresh run."
                     ),
                     error_code=ErrorCode.worker_interrupted,
                 )

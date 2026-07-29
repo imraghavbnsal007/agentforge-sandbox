@@ -10,6 +10,7 @@ from fastapi import APIRouter, Request
 from fastapi.responses import RedirectResponse
 
 from app.api.deps import CurrentUser, DbSession
+from app.api.routes.auth import INSTALL_LANDING
 from app.core.config import settings
 from app.core.exceptions import InvalidInputError, NotFoundError
 from app.schemas.github_app import InstallationRead, InstallationsStatus
@@ -85,7 +86,7 @@ async def installation_setup(
         # A bare setup hit with nothing to verify (e.g. "Configure" with no
         # change) — nothing to do but return the user to the app.
         return RedirectResponse(
-            f"{settings.frontend_url.rstrip('/')}/settings/installations",
+            f"{settings.frontend_url.rstrip('/')}{INSTALL_LANDING}",
             status_code=303,
         )
 
@@ -94,7 +95,7 @@ async def installation_setup(
         # to verify until it is granted.
         return RedirectResponse(
             f"{settings.frontend_url.rstrip('/')}"
-            "/settings/installations?pending=1",
+            f"{INSTALL_LANDING}?install_pending=1",
             status_code=303,
         )
 
@@ -105,7 +106,7 @@ async def installation_setup(
         )
 
     state = await OAuthStateStore(request.app.state.kv).issue(
-        redirect_to="/settings/installations",
+        redirect_to=INSTALL_LANDING,
         installation_id=github_installation_id,
     )
     return RedirectResponse(authorize_url(state), status_code=307)

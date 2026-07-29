@@ -4,32 +4,66 @@
     {
       "name": "all",
       "runtimeExecutable": "docker",
-      "runtimeArgs": ["compose", "up", "--build"],
-      "port": 3000
+      "runtimeArgs": [
+        "compose",
+        "up",
+        "--build"
+      ],
+      "port": 3000,
+      "autoPort": false,
+      "url": "http://localhost:3000"
     },
     {
       "name": "frontend",
       "runtimeExecutable": "docker",
-      "runtimeArgs": ["compose", "up", "--build", "frontend"],
-      "port": 3000
+      "runtimeArgs": [
+        "compose",
+        "up",
+        "--build",
+        "frontend"
+      ],
+      "port": 3000,
+      "autoPort": false,
+      "url": "http://localhost:3000"
     },
     {
       "name": "backend",
       "runtimeExecutable": "docker",
-      "runtimeArgs": ["compose", "up", "--build", "backend"],
-      "port": 8000
+      "runtimeArgs": [
+        "compose",
+        "up",
+        "--build",
+        "backend"
+      ],
+      "port": 8000,
+      "autoPort": false,
+      "url": "http://localhost:8000"
     },
     {
       "name": "worker",
       "runtimeExecutable": "docker",
-      "runtimeArgs": ["compose", "up", "--build", "worker"],
-      "port": 6379
+      "runtimeArgs": [
+        "compose",
+        "up",
+        "--build",
+        "worker"
+      ],
+      "port": 6379,
+      "autoPort": false
     },
     {
       "name": "logs",
       "runtimeExecutable": "docker",
-      "runtimeArgs": ["compose", "logs", "-f", "backend", "worker"],
-      "port": 8000
+      "runtimeArgs": [
+        "compose",
+        "logs",
+        "-f",
+        "backend",
+        "worker"
+      ],
+      "port": 8000,
+      "autoPort": false,
+      "url": "http://localhost:8000"
     }
   ]
 }

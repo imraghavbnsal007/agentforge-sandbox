@@ -148,7 +148,29 @@ async def test_reaping_emits_an_explanatory_event(
 
     history = await events.history(task.id)
     assert history[-1].error_code == ErrorCode.worker_interrupted
-    assert "worker stopped" in history[-1].message.lower()
+    assert "stopped reporting progress" in history[-1].message.lower()
+
+
+async def test_the_reaper_does_not_claim_the_worker_died(
+    session: AsyncSession, task: Task, kv: InMemoryKVStore
+):
+    """All a stale heartbeat proves is silence, not a dead worker.
+
+    Runs 16 and 17 (2026-07-29) were reaped while the worker was still
+    running fine — it had crashed *recording* the run's failure. The old
+    wording sent us hunting for a container that had never gone down.
+    """
+    run = await _run(session, task, heartbeat_age=STALE_AFTER_SECONDS + 60)
+    events = TaskEventService(session, kv)
+
+    await reap_stale_runs(session, events)
+    await session.refresh(run)
+
+    assert "worker stopped" not in (run.error or "").lower()
+    assert "stopped reporting progress" in (run.error or "").lower()
+    # It points at where the real cause actually is.
+    assert "log" in (run.error or "").lower()
+    assert "preserved" in (run.error or "").lower()
 
 
 async def test_reaping_is_idempotent(session: AsyncSession, task: Task):

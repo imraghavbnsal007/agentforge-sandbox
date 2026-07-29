@@ -433,6 +433,16 @@ export const cancelTask = (id: number) => postAction(id, "cancel");
  */
 export const duplicateTask = (id: number) => postAction(id, "duplicate");
 
+/**
+ * Browser-side: delete a task and its runs.
+ *
+ * Removes only AgentForge's record. The repository, its commits and any pull
+ * request this task opened are untouched.
+ */
+export async function deleteTask(id: number): Promise<void> {
+  await mutate<void>(`/api/v1/tasks/${id}`, { method: "DELETE" });
+}
+
 /** Browser-side: event history after a cursor — the replay source. */
 export async function getTaskEvents(
   id: number,

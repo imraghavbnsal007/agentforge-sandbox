@@ -49,7 +49,7 @@ EDIT_TOOLS = [
     },
     {
         "name": "delete_file",
-        "description": "Delete a file from the repository.",
+        "description": "Delete a single file from the repository.",
         "input_schema": {
             "type": "object",
             "properties": {
@@ -58,12 +58,50 @@ EDIT_TOOLS = [
             "required": ["path"],
         },
     },
+    {
+        "name": "delete_path",
+        "description": (
+            "Delete a file, an entire directory, or everything matching a "
+            "glob pattern — in one call. Always prefer this over repeated "
+            "delete_file calls when clearing generated files, caches or IDE "
+            "directories. Examples: '.idea', '.gradle', 'db.sqlite3', "
+            "'**/__pycache__', '**/*.pyc'."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "pattern": {
+                    "type": "string",
+                    "description": (
+                        "Relative path, directory, or glob pattern. "
+                        "'**' matches across directories."
+                    ),
+                }
+            },
+            "required": ["pattern"],
+        },
+    },
 ]
+
+#: Deleting a build cache can remove hundreds of files. The model needs to
+#: know it worked, not to read every path back — and a full listing would eat
+#: the context window the run still has editing to do with.
+DELETION_REPORT_LIMIT = 20
+
+
+def _describe_deletions(pattern: str, deleted: list[str]) -> str:
+    listing = "\n".join(deleted[:DELETION_REPORT_LIMIT])
+    if len(deleted) > DELETION_REPORT_LIMIT:
+        listing += f"\n… and {len(deleted) - DELETION_REPORT_LIMIT} more"
+    return f"Deleted {len(deleted)} file(s) matching {pattern!r}:\n{listing}"
 
 SYSTEM_PROMPT = (
     "You are AgentForge, an expert software engineer. You implement feature "
     "requests in a small repository. Write clean, idiomatic code that matches "
-    "the existing style, and always cover new behavior with tests."
+    "the existing style, and always cover new behavior with tests. "
+    "Batch your work: use delete_path with a glob to remove groups of files "
+    "in one call, and make as many tool calls per turn as the change needs. "
+    "You have a limited number of turns, not a limited number of edits."
 )
 
 
@@ -192,6 +230,11 @@ class LLMRunner:
                 log(f"agent: delete_file {path}")
                 workspace.delete_file(path)
                 return f"Deleted {path}", False
+            if name == "delete_path":
+                pattern = tool_input.get("pattern", "")
+                deleted = workspace.delete_path(pattern)
+                log(f"agent: delete_path {pattern} — {len(deleted)} file(s)")
+                return _describe_deletions(pattern, deleted), False
             return f"Unknown tool: {name}", True
         except WorkspaceError as exc:
             log(f"agent: tool error — {exc}")
