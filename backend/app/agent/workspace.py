@@ -9,6 +9,15 @@ from app.core.enums import ChangeType
 
 IGNORED = ("__pycache__", ".pytest_cache", ".git", "*.pyc")
 
+#: Never removable, whatever is asked for. `.git` is the repository itself —
+#: deleting it would destroy the history every diff is computed against.
+PROTECTED_PARTS = frozenset({".git"})
+
+#: Ceiling on a single delete_path call, so a mistyped wildcard cannot
+#: quietly empty the repository. Generous on purpose: a Gradle or pip cache
+#: runs to hundreds of files and clearing it is a legitimate request.
+MAX_DELETIONS_PER_CALL = 2000
+
 # Extensions that are binary by definition (shared vocabulary with repo_facts,
 # duplicated here to keep the agent layer import-light).
 BINARY_EXTENSIONS = {
@@ -112,7 +121,12 @@ class Workspace:
             if not path.is_file():
                 continue
             parts = path.relative_to(self.root).parts
-            if "__pycache__" in parts or ".git" in parts:
+            # `.git` is repository machinery, never content. `__pycache__`
+            # was hidden here too, which meant a repository that had
+            # committed it could never be cleaned: the files were invisible
+            # to the snapshot, so deleting them produced no diff and the
+            # change was silently dropped before it reached a pull request.
+            if any(part in PROTECTED_PARTS for part in parts):
                 continue
             files.append(path.relative_to(self.root).as_posix())
         return sorted(files)
@@ -136,9 +150,105 @@ class Workspace:
 
     def delete_file(self, rel_path: str) -> None:
         target = self._resolve(rel_path)
+        if target.is_dir():
+            # The old message here was "File not found", which is how an
+            # agent asked to remove `.gradle` ended up deleting it one file
+            # at a time and running out of turns.
+            raise WorkspaceError(
+                f"{rel_path!r} is a directory — use delete_path to remove it"
+            )
         if not target.is_file():
             raise WorkspaceError(f"File not found: {rel_path!r}")
         target.unlink()
+
+    def delete_path(self, pattern: str) -> list[str]:
+        """Delete a file, a directory tree, or a glob. Returns what went.
+
+        `delete_file` takes exactly one file, so clearing a build cache cost
+        one model turn per file and the edit loop ran out of turns long
+        before the repository was clean. "Remove __pycache__ directories,
+        *.pyc and .idea" is one operation as far as the request is
+        concerned, so it is one operation here.
+        """
+        pattern = (pattern or "").strip()
+        if not pattern:
+            raise WorkspaceError("delete_path needs a path or glob pattern")
+        if pattern.startswith("/") or Path(pattern).is_absolute():
+            raise WorkspaceError(
+                f"Path must be relative to the repository: {pattern!r}"
+            )
+        if pattern.strip("./") in ("", "*", "**"):
+            raise WorkspaceError(
+                f"Refusing to delete the whole repository ({pattern!r})"
+            )
+
+        matched = self._match(pattern)
+        files = sorted({f for match in matched for f in self._files_under(match)})
+        if not files:
+            raise WorkspaceError(f"Nothing to delete matching {pattern!r}")
+        if len(files) > MAX_DELETIONS_PER_CALL:
+            raise WorkspaceError(
+                f"{pattern!r} matches {len(files)} files, over the "
+                f"{MAX_DELETIONS_PER_CALL} limit for one call — narrow it"
+            )
+
+        deleted = [target.relative_to(self.root).as_posix() for target in files]
+        for target in files:
+            target.unlink()
+        self._prune_empty_dirs()
+        return sorted(deleted)
+
+    def _match(self, pattern: str) -> list[Path]:
+        """Resolve a literal path or glob to existing paths inside the root."""
+        candidates = (
+            list(self.root.glob(pattern))
+            if any(ch in pattern for ch in "*?[")
+            else [self.root / pattern]
+        )
+        root = self.root.resolve()
+        inside = []
+        for candidate in candidates:
+            resolved = candidate.resolve()
+            if resolved == root or not resolved.is_relative_to(root):
+                raise WorkspaceError(f"Path escapes the workspace: {pattern!r}")
+            if candidate.exists():
+                inside.append(candidate)
+        return inside
+
+    def _files_under(self, target: Path) -> list[Path]:
+        """Every deletable file at or beneath a path; protected ones excluded."""
+        if self._is_protected(target):
+            return []
+        if target.is_file() or target.is_symlink():
+            return [target]
+        return [
+            child
+            for child in target.rglob("*")
+            if child.is_file() and not self._is_protected(child)
+        ]
+
+    def _is_protected(self, target: Path) -> bool:
+        return any(
+            part in PROTECTED_PARTS
+            for part in target.relative_to(self.root).parts
+        )
+
+    def _prune_empty_dirs(self) -> None:
+        """Drop directories left empty by a deletion.
+
+        Without this, removing every file under `.gradle` leaves the empty
+        tree behind and the repository does not look cleaned.
+        """
+        directories = sorted(
+            (p for p in self.root.rglob("*") if p.is_dir()),
+            key=lambda p: len(p.parts),
+            reverse=True,
+        )
+        for directory in directories:
+            if self._is_protected(directory):
+                continue
+            if not any(directory.iterdir()):
+                directory.rmdir()
 
     def compute_changes(self) -> list[FileChangeData]:
         changes = []
