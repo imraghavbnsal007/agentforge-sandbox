@@ -28,6 +28,21 @@ def _neutral_github_settings(monkeypatch: pytest.MonkeyPatch):
 
     monkeypatch.setattr(settings, "github_allowed_repos", "")
     monkeypatch.setattr(settings, "auth_mode", AuthMode.local)
+    # Also neutralise GitHub App configuration. Without this, tests pass or
+    # fail depending on whether the developer running them happens to have a
+    # real App configured in .env — which is exactly the kind of ambient
+    # dependency that makes a suite untrustworthy.
+    for attribute in (
+        "github_app_id",
+        "github_app_private_key_path",
+        "github_app_client_id",
+        "github_app_client_secret",
+        "github_app_name",
+        "github_app_webhook_secret",
+        "github_app_commit_name",
+        "github_app_commit_email",
+    ):
+        monkeypatch.setattr(settings, attribute, "")
     yield
 
 
@@ -56,6 +71,7 @@ async def session() -> AsyncIterator[AsyncSession]:
         connect_args={"check_same_thread": False},
         poolclass=StaticPool,
     )
+
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
     factory = async_sessionmaker(engine, expire_on_commit=False)
