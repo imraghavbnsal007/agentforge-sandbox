@@ -50,6 +50,11 @@ class AgentRun(Base):
     model_calls: Mapped[int] = mapped_column(Integer, default=0)
     tool_calls: Mapped[int] = mapped_column(Integer, default=0)
     plan: Mapped[list | None] = mapped_column(JSON, nullable=True)
+    # Set when the agent stopped before finishing — out of turns, or going in
+    # circles. The run still succeeded and its changes are real; this is the
+    # warning that they may not be the whole job. Distinct from `error`, which
+    # means the run produced nothing usable.
+    incomplete_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
     summary: Mapped[str | None] = mapped_column(Text, nullable=True)
     log: Mapped[str | None] = mapped_column(Text, nullable=True)
     error: Mapped[str | None] = mapped_column(Text, nullable=True)

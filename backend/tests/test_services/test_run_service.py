@@ -287,3 +287,81 @@ async def test_a_failure_mid_generation_keeps_the_log(
     assert run.log is not None
     assert "agent run started" in run.log
     assert "run failed: Edit loop exceeded 20 iterations" in run.log
+
+
+# -- an agent that stopped early --------------------------------------------
+#
+# Running out of turns used to raise, which discarded the whole run. The
+# changes are real work; the user gets them, plus a warning that they may not
+# be the whole job.
+
+
+class UnfinishedRunner(MockRunner):
+    """Edits the workspace, then reports that it did not finish."""
+
+    async def apply_changes(self, title, request, plan, workspace, log):
+        from app.agent.runner import EditOutcome
+
+        await super().apply_changes(title, request, plan, workspace, log)
+        return EditOutcome.stopped(
+            "The agent stopped after 80 turns because the 80-turn limit was "
+            "reached. The changes it did make are included below and may be "
+            "incomplete.",
+            turns=80,
+        )
+
+
+async def test_an_unfinished_run_still_succeeds(
+    session: AsyncSession, task: Task
+) -> None:
+    service = RunService(session, runner=UnfinishedRunner(delay=0), executor=FakeExecutor())
+    run = await service.execute_agent_run(task.id)
+
+    assert run.status == RunStatus.completed
+    assert run.error is None
+    # Sample-repo project, so it completes rather than going to review — the
+    # point is that stopping early did not turn it into a failure.
+    assert task.status == TaskStatus.completed
+
+
+async def test_an_unfinished_run_keeps_the_changes_it_made(
+    session: AsyncSession, task: Task
+) -> None:
+    """The reason not to raise: the work exists and is worth reviewing."""
+    service = RunService(session, runner=UnfinishedRunner(delay=0), executor=FakeExecutor())
+    run = await service.execute_agent_run(task.id)
+
+    changed = {c.path for c in run.file_changes}
+    assert "calculator.py" in changed
+    assert run.test_results[0].passed == 7
+
+
+async def test_an_unfinished_run_says_so(session: AsyncSession, task: Task) -> None:
+    service = RunService(session, runner=UnfinishedRunner(delay=0), executor=FakeExecutor())
+    run = await service.execute_agent_run(task.id)
+
+    assert run.incomplete_reason is not None
+    assert "80 turns" in run.incomplete_reason
+    assert "incomplete" in (run.log or "")
+
+
+async def test_the_warning_travels_into_the_pull_request_body(
+    session: AsyncSession, task: Task
+) -> None:
+    """The summary becomes the PR body. A reviewer must not have to deduce
+    that a change is partial from what is missing."""
+    service = RunService(session, runner=UnfinishedRunner(delay=0), executor=FakeExecutor())
+    run = await service.execute_agent_run(task.id)
+
+    assert run.summary is not None
+    assert run.summary.startswith("> ⚠️ **Incomplete:**")
+
+
+async def test_a_finished_run_carries_no_warning(
+    session: AsyncSession, task: Task
+) -> None:
+    service = RunService(session, runner=MockRunner(delay=0), executor=FakeExecutor())
+    run = await service.execute_agent_run(task.id)
+
+    assert run.incomplete_reason is None
+    assert not (run.summary or "").startswith(">")

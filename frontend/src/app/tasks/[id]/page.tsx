@@ -103,6 +103,13 @@ export default async function TaskDetailPage({
         </div>
       )}
 
+      {run?.incomplete_reason && (
+        <div className="card border-amber-500/30 bg-amber-500/[0.06] px-5 py-3 text-sm text-amber-200">
+          <span className="font-medium">Incomplete:</span>{" "}
+          {run.incomplete_reason}
+        </div>
+      )}
+
       {task.status === "ready_for_review" &&
         run &&
         run.test_results.length === 0 && (
