@@ -17,7 +17,15 @@ export default async function RootLayout({
 
   return (
     <html lang="en">
-      <body className="min-h-screen bg-surface-0 font-sans text-ink antialiased">
+      {/* suppressHydrationWarning: browser extensions (Grammarly, password
+          managers) inject attributes onto <body> before React hydrates, which
+          React then reports as a server/client mismatch. It is not our markup
+          differing — scoped to this element only, so genuine mismatches
+          anywhere else still surface. */}
+      <body
+        suppressHydrationWarning
+        className="min-h-screen bg-surface-0 font-sans text-ink antialiased"
+      >
         <ChunkGuard />
         <Providers>
           <a
