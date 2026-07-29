@@ -55,6 +55,7 @@ class RunTracker:
         self._lease = lease
         self._lock = lock
         self._publishing = publishing
+        self._lease_lost = False
 
     # -- stage / progress --------------------------------------------------
 
@@ -96,15 +97,48 @@ class RunTracker:
 
         A lapsed lease means another worker may have taken over, so we stop
         rather than race it.
+
+        This only fires at stage boundaries. Between them — most importantly
+        through the whole generation step — `RunHeartbeat` does the beating.
         """
         self.run.heartbeat_at = datetime.now(timezone.utc)
-        if self._lease is not None and self._lock is not None:
-            if not await self._lock.renew(self._lease):
-                logger.warning(
-                    "Lease lost for task %s; another worker may have taken over",
-                    self.task.id,
-                )
-                raise RunCancelled("Lease expired — another worker took over")
+        if not await self.renew_lease():
+            raise RunCancelled("Lease expired — another worker took over")
+
+    async def renew_lease(self) -> bool:
+        """Extend the execution lease. False means we no longer hold it."""
+        if self._lease is None or self._lock is None:
+            return True
+        if await self._lock.renew(self._lease):
+            return True
+        self.note_lease_lost()
+        return False
+
+    def note_lease_lost(self) -> None:
+        """Record that the lease lapsed, for the next checkpoint to act on.
+
+        The background heartbeat discovers this, but it is not the coroutine
+        doing the work — raising there would be swallowed. Flagging instead
+        means the run stops cleanly at its next checkpoint.
+        """
+        if not self._lease_lost:
+            logger.warning(
+                "Lease lost for task %s; another worker may have taken over",
+                self.task.id,
+            )
+        self._lease_lost = True
+
+    async def reload(self) -> None:
+        """Re-read task and run after a rollback.
+
+        `session.rollback()` expires every instance in the session, so the
+        next attribute *read* triggers a lazy load — which raises
+        MissingGreenlet inside an async session. The terminal handlers run
+        immediately after a rollback and do read those attributes, so they
+        have to refresh first. Setting an attribute is safe; reading is not.
+        """
+        await self.session.refresh(self.run)
+        await self.session.refresh(self.task)
 
     # -- cancellation ------------------------------------------------------
 
@@ -127,6 +161,8 @@ class RunTracker:
     async def checkpoint(self) -> None:
         """Stop here if the user asked to. Called before and after every
         expensive or irreversible step."""
+        if self._lease_lost:
+            raise RunCancelled("Lease expired — another worker took over")
         if await self.is_cancelled():
             raise RunCancelled("Cancellation requested")
 

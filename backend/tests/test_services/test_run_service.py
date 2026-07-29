@@ -226,3 +226,64 @@ async def test_llm_mode_without_api_key_fails_cleanly(
     assert run.status == RunStatus.failed
     assert "ANTHROPIC_API_KEY" in (run.error or "")
     assert task.status == TaskStatus.failed
+
+
+# -- failing mid-generation -------------------------------------------------
+#
+# The regression these guard: `session.rollback()` in the failure handler
+# expires every ORM instance, and the handler then *read* `run.progress`.
+# In an async session that lazy-load raises MissingGreenlet, so the real
+# error never reached the database and the run stayed `running` until the
+# reaper mislabelled it "the worker stopped". See runs 16 and 17 (2026-07-29).
+
+
+class DirtyExplodingRunner(MockRunner):
+    """Fails the way the real LLM runner does — with work pending.
+
+    `ExplodingRunner` raises on a clean session, where rollback() is a no-op
+    and nothing is expired. The LLM service writes an `llm_runs` row per API
+    call, so by the time generation fails there is a live transaction for the
+    rollback to actually roll back. That is what expires the instances.
+    """
+
+    def __init__(self, session: AsyncSession) -> None:
+        super().__init__(delay=0)
+        self._session = session
+
+    async def apply_changes(self, title, request, plan, workspace, log):
+        from app.models import LLMRun
+
+        self._session.add(
+            LLMRun(provider="google", model="gemini-3.1-flash-lite", phase="coding")
+        )
+        await self._session.flush()
+        raise RuntimeError("Edit loop exceeded 20 iterations")
+
+
+async def test_a_failure_mid_generation_records_the_real_error(
+    session: AsyncSession, task: Task
+) -> None:
+    service = RunService(
+        session, runner=DirtyExplodingRunner(session), executor=FakeExecutor()
+    )
+    run = await service.execute_agent_run(task.id)
+
+    assert run.status == RunStatus.failed
+    assert run.finished_at is not None
+    # The actual cause, not a guess made five minutes later by the reaper.
+    assert "Edit loop exceeded 20 iterations" in (run.error or "")
+    assert task.status == TaskStatus.failed
+
+
+async def test_a_failure_mid_generation_keeps_the_log(
+    session: AsyncSession, task: Task
+) -> None:
+    """The log is rebuilt from memory after the rollback, not lost with it."""
+    service = RunService(
+        session, runner=DirtyExplodingRunner(session), executor=FakeExecutor()
+    )
+    run = await service.execute_agent_run(task.id)
+
+    assert run.log is not None
+    assert "agent run started" in run.log
+    assert "run failed: Edit loop exceeded 20 iterations" in run.log
