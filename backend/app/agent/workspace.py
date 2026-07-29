@@ -87,7 +87,23 @@ class Workspace:
     def _snapshot_entry(self, rel_path: str) -> "str | BinaryInfo":
         if self.is_binary(rel_path):
             return self._binary_info(rel_path)
-        return self.read_file(rel_path)
+        return self._read_raw(rel_path)
+
+    def _read_raw(self, rel_path: str) -> str:
+        """Read a file without translating its line endings.
+
+        `read_text()` performs universal-newline translation, so a CRLF file
+        comes back as LF and every diff computed from it describes content
+        that is not on disk. `git apply` then fails with "patch does not
+        apply" — which is how publishing a cleanup of an IntelliJ project
+        died on `.idea/WeatherApp.iml`.
+
+        The agent still sees normalised text through `read_file`; this is
+        what the *diff* is built from, and it has to match the bytes.
+        """
+        target = self._resolve(rel_path)
+        with open(target, "r", errors="replace", newline="") as fh:
+            return fh.read().replace("\x00", "")
 
     def is_binary(self, rel_path: str) -> bool:
         target = self._resolve(rel_path)
@@ -146,7 +162,21 @@ class Workspace:
     def write_file(self, rel_path: str, content: str) -> None:
         target = self._resolve(rel_path)
         target.parent.mkdir(parents=True, exist_ok=True)
-        target.write_text(content)
+        # Models write LF. Rewriting a CRLF file with LF is a real change to
+        # every line in it, which would bury a one-line edit in a whole-file
+        # diff, so an existing file keeps the endings it already had.
+        if target.is_file() and self._uses_crlf(target):
+            content = content.replace("\r\n", "\n").replace("\n", "\r\n")
+        with open(target, "w", newline="") as fh:
+            fh.write(content)
+
+    @staticmethod
+    def _uses_crlf(target: Path) -> bool:
+        try:
+            head = target.read_bytes()[:8192]
+        except OSError:
+            return False
+        return b"\r\n" in head
 
     def delete_file(self, rel_path: str) -> None:
         target = self._resolve(rel_path)
