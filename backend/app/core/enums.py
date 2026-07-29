@@ -68,6 +68,7 @@ class ErrorCode(StrEnum):
     installation_suspended = "installation_suspended"
     credential_resolution_failed = "credential_resolution_failed"
     clone_failed = "clone_failed"
+    patch_failed = "patch_failed"
     provider_unavailable = "provider_unavailable"
     provider_rate_limited = "provider_rate_limited"
     context_limit_exceeded = "context_limit_exceeded"

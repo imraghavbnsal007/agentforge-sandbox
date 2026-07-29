@@ -137,6 +137,14 @@ class GitClient:
         await self._run(["checkout", "-b", name], cwd=cwd)
 
     async def apply_diff(self, cwd: Path, diff: str) -> None:
+        if not diff.strip():
+            # git's own answer to empty input is "No valid patches in input",
+            # which reads like the patch was malformed rather than absent.
+            # Callers must handle the change some other way — see the
+            # publisher's empty-file deletion path.
+            raise GitError(
+                "Refusing to apply an empty patch — there is nothing to apply"
+            )
         if not diff.endswith("\n"):
             diff += "\n"
         await self._run(["apply", "--whitespace=nowarn"], cwd=cwd, stdin=diff)

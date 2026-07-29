@@ -102,6 +102,13 @@ ERROR_CATALOGUE: dict[ErrorCode, ErrorInfo] = {
         "underlying error. Retry to start a fresh run.",
         retryable=True,
     ),
+    ErrorCode.patch_failed: ErrorInfo(
+        ErrorCode.patch_failed,
+        "The recorded changes no longer apply to this branch.",
+        "The branch may have moved since the run, or a change cannot be "
+        "expressed as a patch. Retry to run against the current branch.",
+        retryable=True,
+    ),
     ErrorCode.push_failed: ErrorInfo(
         ErrorCode.push_failed,
         "The branch could not be pushed to GitHub.",
@@ -161,5 +168,13 @@ def classify(exc: BaseException) -> ErrorCode:
             return ErrorCode.context_limit_exceeded
         return ErrorCode.provider_unavailable
     if isinstance(exc, GitError):
+        # Not every git failure is a clone failure. Saying so sent people
+        # checking repository access when the clone had worked perfectly and
+        # it was applying the diff that broke.
+        text = str(exc).lower()
+        if "apply" in text or "patch" in text:
+            return ErrorCode.patch_failed
+        if "push" in text:
+            return ErrorCode.push_failed
         return ErrorCode.clone_failed
     return ErrorCode.internal_error

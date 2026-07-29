@@ -115,12 +115,14 @@ export default async function TaskDetailPage({
         run.test_results.length === 0 && (
           <div className="card border-amber-500/30 bg-amber-500/[0.06] px-5 py-3 text-sm text-amber-300">
             <span className="font-medium">No automated test command detected.</span>{" "}
-            These changes have not been verified by tests — review the diff
-            carefully before approving.
+            AgentForge could not find a suite to run for this repository, so
+            nothing here has been checked by anything but the model.
           </div>
         )}
 
-      {task.status === "ready_for_review" && <ReviewActions taskId={task.id} />}
+      {task.status === "ready_for_review" && (
+        <ReviewActions taskId={task.id} tests={run?.test_results ?? []} />
+      )}
 
       {task.status === "publishing" && (
         <div className="card flex items-center gap-3 border-cyan-500/30 bg-cyan-500/[0.06] px-5 py-3 text-sm text-cyan-300">

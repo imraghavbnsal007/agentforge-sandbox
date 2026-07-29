@@ -109,3 +109,16 @@ def test_token_never_appears_in_output():
     assert "ghp_supersecret123" not in scrubbed
     assert git._b64 not in scrubbed
     assert "***" in scrubbed
+
+
+async def test_applying_an_empty_patch_is_refused_clearly():
+    """git's own answer to empty input is "No valid patches in input", which
+    reads like the patch was malformed rather than simply absent."""
+    from pathlib import Path
+
+    from app.services.git_client import GitClient, GitError
+
+    client = GitClient(token="", committer_name="n", committer_email="e")
+    for empty in ("", "   ", "\n\n"):
+        with pytest.raises(GitError, match="empty patch"):
+            await client.apply_diff(Path("/tmp"), empty)
