@@ -236,9 +236,16 @@ class RunService:
             await tracker.enter(
                 RunStage.generating, "Generating changes", TaskStatus.coding
             )
-            await runner.apply_changes(
+            outcome = await runner.apply_changes(
                 task.title, task.request, run.plan, workspace, log
             )
+            # Running out of turns is not a failure. The workspace holds real
+            # work; discarding it — which raising used to do — threw away the
+            # only useful thing the run produced. Carry the warning instead
+            # and let the diff, tests and review happen as normal.
+            if outcome is not None and not outcome.complete:
+                run.incomplete_reason = outcome.reason
+                log(f"incomplete: {outcome.reason}")
             # Generation is the longest step; stop here if asked, before any
             # further work is done on changes we are about to discard.
             await tracker.checkpoint()
@@ -328,6 +335,14 @@ class RunService:
             run.summary = await runner.summarize(
                 task.title, task.request, run.plan, changes, tests
             )
+            if run.incomplete_reason:
+                # The summary becomes the pull request body, so the warning
+                # has to travel with it — a reviewer must not learn that a
+                # change is partial only by noticing what is missing.
+                run.summary = (
+                    f"> ⚠️ **Incomplete:** {run.incomplete_reason}\n\n"
+                    f"{run.summary}"
+                )
 
             tests_green = tests.failed == 0 and tests.errored == 0
             # One place decides how a finished run maps onto the task, so the

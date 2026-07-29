@@ -269,6 +269,8 @@ export interface AgentRun {
   summary: string | null;
   log: string | null;
   error: string | null;
+  /** Set when the agent stopped early; the run still succeeded. */
+  incomplete_reason: string | null;
   branch_name: string | null;
   commit_sha: string | null;
   pr_url: string | null;

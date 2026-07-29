@@ -1,7 +1,7 @@
 import asyncio
 
 from app.agent.executor import TestResultData
-from app.agent.runner import LogFn
+from app.agent.runner import EditOutcome, LogFn
 from app.agent.workspace import FileChangeData, Workspace
 from app.core.config import settings
 from app.core.enums import AgentMode
@@ -60,13 +60,14 @@ class MockRunner:
         plan: list[str],
         workspace: Workspace,
         log: LogFn,
-    ) -> None:
+    ) -> EditOutcome:
         await self._pause()
         calculator = workspace.read_file("calculator.py")
         workspace.write_file("calculator.py", calculator + MULTIPLY_FUNCTION)
         log("mock: appended multiply() to calculator.py")
         workspace.write_file("tests/test_multiply.py", MULTIPLY_TESTS)
         log("mock: created tests/test_multiply.py")
+        return EditOutcome.finished()
 
     async def summarize(
         self,

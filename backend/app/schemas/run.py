@@ -41,6 +41,9 @@ class AgentRunRead(BaseModel):
     summary: str | None
     log: str | None
     error: str | None
+    #: Set when the agent stopped early. The run still succeeded — this warns
+    #: that its changes may not be the whole job.
+    incomplete_reason: str | None = None
     branch_name: str | None
     commit_sha: str | None
     pr_url: str | None
