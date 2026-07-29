@@ -14,9 +14,11 @@ import {
   IconEye,
   IconExternal,
   IconRetry,
+  IconTrash,
 } from "@/components/ui/Icons";
 import { Spinner } from "@/components/ui/Button";
-import { retryTask, type Task, type TaskStatus } from "@/lib/api";
+import { deleteTask, retryTask, type Task, type TaskStatus } from "@/lib/api";
+import { DeleteTaskDialog } from "@/components/DeleteTaskDialog";
 import { formatCost, formatDuration, timeAgo } from "@/lib/format";
 
 /** How far along the pipeline each status is (drives the progress bar). */
@@ -72,6 +74,7 @@ export function TaskCard({
   repo,
   estimatedCost,
   index = 0,
+  onDeleted,
 }: {
   task: Task;
   projectName: string;
@@ -80,10 +83,15 @@ export function TaskCard({
   /** Profile-based cost estimate in USD; null when unknown/custom. */
   estimatedCost: number | null;
   index?: number;
+  /** Called after a successful delete so the list can drop the card. */
+  onDeleted?: (taskId: number) => void;
 }) {
   const router = useRouter();
   const [retrying, setRetrying] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [confirming, setConfirming] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
 
   const finished = FINISHED.includes(task.status);
   const running = RUNNING.includes(task.status);
@@ -107,6 +115,25 @@ export function TaskCard({
       setError(err instanceof Error ? err.message : "Retry failed");
     } finally {
       setRetrying(false);
+    }
+  }
+
+  async function onDelete() {
+    setDeleting(true);
+    setDeleteError(null);
+    try {
+      await deleteTask(task.id);
+      setConfirming(false);
+      // Remove it from the list straight away rather than waiting for a
+      // refetch, then reconcile with the server.
+      onDeleted?.(task.id);
+      router.refresh();
+    } catch (err) {
+      setDeleteError(
+        err instanceof Error ? err.message : "Could not delete this task",
+      );
+    } finally {
+      setDeleting(false);
     }
   }
 
@@ -219,6 +246,12 @@ export function TaskCard({
             {retrying ? <Spinner className="h-3.5 w-3.5" /> : <IconRetry className="h-3.5 w-3.5" />}
           </ActionButton>
         )}
+        <ActionButton
+          label={`Delete task: ${task.title}`}
+          onClick={() => setConfirming(true)}
+        >
+          <IconTrash className="h-3.5 w-3.5" />
+        </ActionButton>
         <Link
           href={duplicateHref}
           aria-label={`Duplicate task: ${task.title}`}
@@ -230,6 +263,19 @@ export function TaskCard({
       </div>
 
       {error && <p className="relative z-10 text-xs text-red-400">{error}</p>}
+
+      {confirming && (
+        <DeleteTaskDialog
+          taskTitle={task.title}
+          busy={deleting}
+          error={deleteError}
+          onCancel={() => {
+            setConfirming(false);
+            setDeleteError(null);
+          }}
+          onConfirm={onDelete}
+        />
+      )}
     </motion.article>
   );
 }

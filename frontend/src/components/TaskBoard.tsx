@@ -17,6 +17,22 @@ const FILTERS: { key: FilterKey; label: string; statuses: TaskStatus[] | null }[
   { key: "cancelled", label: "Cancelled", statuses: ["rejected"] },
 ];
 
+function Toast({ message, onDone }: { message: string; onDone: () => void }) {
+  useEffect(() => {
+    const timer = setTimeout(onDone, 4000);
+    return () => clearTimeout(timer);
+  }, [onDone]);
+  return (
+    <div
+      role="status"
+      aria-live="polite"
+      className="fixed bottom-6 left-1/2 z-50 -translate-x-1/2 rounded-xl border border-line-strong bg-surface-3 px-4 py-2.5 text-sm text-ink shadow-lg"
+    >
+      {message}
+    </div>
+  );
+}
+
 export function TaskBoard({
   tasks,
   projects,
@@ -29,6 +45,10 @@ export function TaskBoard({
   const [query, setQuery] = useState("");
   const [filter, setFilter] = useState<FilterKey>("all");
   const searchRef = useRef<HTMLInputElement>(null);
+  // Ids hidden straight after a successful delete, so the card disappears
+  // without waiting for the server components to refetch.
+  const [deletedIds, setDeletedIds] = useState<number[]>([]);
+  const [toast, setToast] = useState<string | null>(null);
 
   // "/" focuses search from anywhere on the page.
   useEffect(() => {
@@ -43,6 +63,10 @@ export function TaskBoard({
     return () => window.removeEventListener("keydown", onKey);
   }, []);
 
+  const visibleTasks = useMemo(
+    () => tasks.filter((t) => !deletedIds.includes(t.id)),
+    [tasks, deletedIds],
+  );
   const projectById = useMemo(() => new Map(projects.map((p) => [p.id, p])), [projects]);
   const costByProfile = useMemo(
     () => new Map(profiles.map((p) => [p.name, p.estimated_cost_usd])),
@@ -55,17 +79,17 @@ export function TaskBoard({
       map.set(
         f.key,
         f.statuses === null
-          ? tasks.length
-          : tasks.filter((t) => f.statuses!.includes(t.status)).length,
+          ? visibleTasks.length
+          : visibleTasks.filter((t) => f.statuses!.includes(t.status)).length,
       );
     }
     return map;
-  }, [tasks]);
+  }, [visibleTasks]);
 
   const visible = useMemo(() => {
     const active = FILTERS.find((f) => f.key === filter);
     const q = query.trim().toLowerCase();
-    return tasks.filter((task) => {
+    return visibleTasks.filter((task) => {
       if (active?.statuses && !active.statuses.includes(task.status)) return false;
       if (!q) return true;
       const project = projectById.get(task.project_id);
@@ -126,7 +150,7 @@ export function TaskBoard({
 
       {visible.length === 0 ? (
         <div className="card p-12 text-center text-sm text-ink-dim">
-          {tasks.length === 0
+          {visibleTasks.length === 0
             ? "No tasks yet — create one to put the agent to work."
             : "No tasks match the current search or filter."}
         </div>
@@ -149,12 +173,18 @@ export function TaskBoard({
                     ? (costByProfile.get(task.execution_profile) ?? null)
                     : null
                 }
+                onDeleted={(id) => {
+                  setDeletedIds((prev) => [...prev, id]);
+                  setToast("Task deleted");
+                }}
                 index={i}
               />
             );
           })}
         </div>
       )}
+
+      {toast && <Toast message={toast} onDone={() => setToast(null)} />}
     </div>
   );
 }

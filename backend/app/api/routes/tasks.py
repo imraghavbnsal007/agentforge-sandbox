@@ -1,6 +1,6 @@
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, Request, status
+from fastapi import APIRouter, Depends, Request, Response, status
 from fastapi.responses import StreamingResponse
 
 from app.api.deps import Events, KV, get_task_service
@@ -73,6 +73,17 @@ async def approve_task(task_id: int, service: Service) -> TaskRead:
 @router.post("/{task_id}/reject", response_model=TaskRead)
 async def reject_task(task_id: int, service: Service) -> TaskRead:
     return TaskRead.model_validate(await service.reject_task(task_id))
+
+
+@router.delete("/{task_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_task(task_id: int, service: Service) -> Response:
+    """Delete a task and its runs.
+
+    User-scoped like every other task route: another user's task is a 404.
+    Nothing on GitHub is affected — an open pull request stays open.
+    """
+    await service.delete_task(task_id)
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
 @router.post(

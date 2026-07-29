@@ -315,3 +315,148 @@ async def test_running_again_is_scoped_to_the_owner(
 
 async def test_running_again_an_unknown_task_is_404(client: AsyncClient):
     assert (await client.post("/api/v1/tasks/9999/duplicate")).status_code == 404
+
+
+# -- deletion ---------------------------------------------------------------
+
+
+async def test_deleting_a_task_removes_it(
+    client: AsyncClient, session: AsyncSession, task: Task
+):
+    response = await client.delete(f"/api/v1/tasks/{task.id}")
+    assert response.status_code == 204
+    assert (await client.get(f"/api/v1/tasks/{task.id}")).status_code == 404
+    assert (await client.get("/api/v1/tasks")).json() == []
+
+
+async def test_deleting_a_task_removes_its_runs_and_artifacts(
+    client: AsyncClient, session: AsyncSession, task: Task
+):
+    from sqlalchemy import func, select
+
+    from app.core.enums import ChangeType, RunStatus
+    from app.models import FileChange, TestResult
+
+    run = AgentRun(
+        task_id=task.id, mode="mock", status=RunStatus.completed,
+        file_changes=[
+            FileChange(path="a.py", change_type=ChangeType.modify,
+                       diff="d", is_binary=False)
+        ],
+        test_results=[
+            TestResult(suite="pytest", passed=1, failed=0, errored=0,
+                       duration=0.1, output="ok", stderr="")
+        ],
+    )
+    session.add(run)
+    await session.commit()
+
+    await client.delete(f"/api/v1/tasks/{task.id}")
+
+    for model in (AgentRun, FileChange, TestResult):
+        remaining = (
+            await session.execute(select(func.count()).select_from(model))
+        ).scalar_one()
+        assert remaining == 0, model.__name__
+
+
+async def test_deleting_a_task_preserves_usage_and_cost_records(
+    client: AsyncClient, session: AsyncSession, task: Task
+):
+    """The Usage page must stay accurate — deleting a task must not quietly
+    reduce reported spend."""
+    from sqlalchemy import select
+
+    from app.core.enums import RunStatus
+    from app.models import LLMRun
+
+    run = AgentRun(task_id=task.id, mode="llm", status=RunStatus.completed,
+                   file_changes=[], test_results=[])
+    session.add(run)
+    await session.commit()
+    await session.refresh(run)
+    session.add(
+        LLMRun(
+            agent_run_id=run.id, project_id=task.project_id,
+            provider="google", model="gemini-3.1-flash-lite", phase="coding",
+            tokens_in=100, tokens_out=20, estimated_cost=0.005, success=True,
+        )
+    )
+    await session.commit()
+
+    await client.delete(f"/api/v1/tasks/{task.id}")
+
+    surviving = (await session.execute(select(LLMRun))).scalars().all()
+    assert len(surviving) == 1
+    assert surviving[0].estimated_cost == 0.005
+    assert surviving[0].project_id == task.project_id
+    # Only the link to the deleted run is cleared.
+    assert surviving[0].agent_run_id is None
+
+
+async def test_deleting_one_task_never_affects_another(
+    client: AsyncClient, session: AsyncSession, project, task: Task
+):
+    other = Task(project_id=project.id, title="Keep me", request="untouched")
+    session.add(other)
+    await session.commit()
+    await session.refresh(other)
+
+    await client.delete(f"/api/v1/tasks/{task.id}")
+
+    survivor = await client.get(f"/api/v1/tasks/{other.id}")
+    assert survivor.status_code == 200
+    assert survivor.json()["title"] == "Keep me"
+
+
+async def test_deleting_a_running_task_is_refused(
+    client: AsyncClient, session: AsyncSession, task: Task
+):
+    """Deleting mid-run would leave the worker writing to rows that no longer
+    exist."""
+    await _running_run(session, task)
+
+    response = await client.delete(f"/api/v1/tasks/{task.id}")
+
+    assert response.status_code == 409
+    assert "Cancel it first" in response.json()["detail"]
+    assert (await client.get(f"/api/v1/tasks/{task.id}")).status_code == 200
+
+
+async def test_deleting_an_unknown_task_is_404(client: AsyncClient):
+    assert (await client.delete("/api/v1/tasks/9999")).status_code == 404
+
+
+async def test_deleting_is_idempotent_from_the_callers_view(
+    client: AsyncClient, task: Task
+):
+    assert (await client.delete(f"/api/v1/tasks/{task.id}")).status_code == 204
+    assert (await client.delete(f"/api/v1/tasks/{task.id}")).status_code == 404
+
+
+async def test_another_user_cannot_delete_your_task(
+    client: AsyncClient, kv: InMemoryKVStore, other_users_task, app_mode
+):
+    _, bob, task = other_users_task
+    await _sign_in(client, kv, bob)
+
+    assert (await client.delete(f"/api/v1/tasks/{task.id}")).status_code == 404
+
+
+async def test_the_owner_can_delete_their_own_task(
+    client: AsyncClient, kv: InMemoryKVStore, other_users_task, app_mode
+):
+    alice, _, task = other_users_task
+    await _sign_in(client, kv, alice)
+
+    assert (await client.delete(f"/api/v1/tasks/{task.id}")).status_code == 204
+
+
+async def test_deleting_leaves_the_project_intact(
+    client: AsyncClient, session: AsyncSession, project, task: Task
+):
+    """Only the task goes — never the repository record it belonged to."""
+    await client.delete(f"/api/v1/tasks/{task.id}")
+
+    projects = (await client.get("/api/v1/projects")).json()
+    assert [p["id"] for p in projects] == [project.id]
