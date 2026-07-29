@@ -233,7 +233,7 @@ async def test_setup_without_an_installation_id_just_returns_to_the_app(
     client, _ = signed_in
     response = await client.get("/api/v1/github/setup", follow_redirects=False)
     assert response.status_code == 303
-    assert "/settings/installations" in response.headers["location"]
+    assert response.headers["location"].endswith("/projects")
 
 
 async def test_setup_marks_a_pending_org_approval(
@@ -295,9 +295,7 @@ async def test_callback_links_the_installation_carried_in_state(
     session: AsyncSession,
 ):
     """The setup-URL path: the id came from our own state, not the query."""
-    state = await OAuthStateStore(kv).issue(
-        "/settings/installations", installation_id=500
-    )
+    state = await OAuthStateStore(kv).issue("/projects", installation_id=500)
     response = await client.get(
         f"/api/v1/auth/github/callback?code=abc&state={state}",
         follow_redirects=False,
@@ -406,3 +404,189 @@ async def test_sync_of_an_unknown_installation_is_404(
     assert (
         await client.post("/api/v1/github/installations/777/sync")
     ).status_code == 404
+
+
+# -- installs that begin on github.com --------------------------------------
+#
+# When the App requests user authorization during installation, GitHub sends
+# the browser straight to the OAuth callback with `installation_id` and
+# `setup_action` but no `state` — we never started the round trip, so there
+# was nothing to put one in. These cover that entry point.
+
+
+async def _states_in(kv: InMemoryKVStore) -> list[str]:
+    return [
+        (await kv.get(key)) or "" for key in kv.keys_matching("agentforge:oauth_state:*")
+    ]
+
+
+async def test_install_from_github_restarts_a_verified_round_trip(
+    client: AsyncClient, github_app_mode, fake_github, kv: InMemoryKVStore
+):
+    response = await client.get(
+        "/api/v1/auth/github/callback"
+        "?code=abc&installation_id=500&setup_action=install",
+        follow_redirects=False,
+    )
+    assert response.status_code == 307
+    assert response.headers["location"].startswith(
+        "https://github.com/login/oauth/authorize?"
+    )
+    # The id is carried in our own single-use state, so the second callback
+    # can verify it against a token we know is fresh.
+    assert any('"installation_id": 500' in raw for raw in await _states_in(kv))
+
+
+async def test_changing_repository_access_is_handled_the_same_way(
+    client: AsyncClient, github_app_mode, fake_github, kv: InMemoryKVStore
+):
+    """Saving on GitHub's repository-access screen sends setup_action=update."""
+    response = await client.get(
+        "/api/v1/auth/github/callback"
+        "?code=abc&installation_id=500&setup_action=update",
+        follow_redirects=False,
+    )
+    assert response.status_code == 307
+    assert any('"installation_id": 500' in raw for raw in await _states_in(kv))
+
+
+async def test_the_restarted_round_trip_links_the_installation(
+    client: AsyncClient,
+    github_app_mode,
+    fake_github,
+    kv: InMemoryKVStore,
+    session: AsyncSession,
+):
+    """End to end: the bounce and the callback it produces link the install."""
+    from urllib.parse import parse_qs, urlparse
+
+    bounce = await client.get(
+        "/api/v1/auth/github/callback"
+        "?code=first&installation_id=500&setup_action=install",
+        follow_redirects=False,
+    )
+    state = parse_qs(urlparse(bounce.headers["location"]).query)["state"][0]
+
+    done = await client.get(
+        f"/api/v1/auth/github/callback?code=second&state={state}",
+        follow_redirects=False,
+    )
+    assert done.status_code == 303
+    assert done.headers["location"].endswith("/projects")
+
+    from sqlalchemy import select
+
+    link = (
+        await session.execute(select(UserGitHubInstallation))
+    ).scalars().all()
+    assert len(link) == 1
+
+
+async def test_a_stateless_callback_without_an_install_is_still_refused(
+    client: AsyncClient, github_app_mode, fake_github
+):
+    """The CSRF guard on plain sign-in must not be loosened by any of this."""
+    response = await client.get(
+        "/api/v1/auth/github/callback?code=abc", follow_redirects=False
+    )
+    assert response.status_code == 422
+    assert response.headers.get_list("set-cookie") == []
+
+
+async def test_an_org_install_awaiting_approval_explains_itself(
+    client: AsyncClient, github_app_mode, fake_github
+):
+    response = await client.get(
+        "/api/v1/auth/github/callback?installation_id=500&setup_action=request",
+        follow_redirects=False,
+    )
+    assert response.status_code == 303
+    assert response.headers["location"].endswith("/projects?install_pending=1")
+
+
+async def test_an_install_redirect_with_nothing_to_verify_just_returns(
+    client: AsyncClient, github_app_mode, fake_github
+):
+    response = await client.get(
+        "/api/v1/auth/github/callback?setup_action=install",
+        follow_redirects=False,
+    )
+    assert response.status_code == 303
+    assert response.headers["location"].endswith("/projects")
+
+
+async def test_a_failed_link_sends_the_user_somewhere_that_explains_it(
+    client: AsyncClient, github_app_mode, fake_github, kv: InMemoryKVStore
+):
+    """GitHub does not list the installation for this user: sign in, warn."""
+    fake_github.user_installations = []
+    state = await OAuthStateStore(kv).issue("/", installation_id=500)
+    response = await client.get(
+        f"/api/v1/auth/github/callback?code=abc&state={state}",
+        follow_redirects=False,
+    )
+    assert response.status_code == 303
+    assert response.headers["location"].endswith(
+        "/projects?install_error=not_available"
+    )
+
+
+async def test_linking_caches_the_installations_repositories(
+    client: AsyncClient,
+    github_app_mode,
+    fake_github,
+    kv: InMemoryKVStore,
+    session: AsyncSession,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    """A fresh link must leave the picker something to show.
+
+    The picker reads the local cache, so without this first sync the user
+    lands on "no repositories" immediately after granting access to some.
+    """
+    from app.services.github_app_api import RepositoryInfo
+
+    class FakeRepoAPI:
+        async def list_installation_repositories(self, token: str):
+            return [
+                RepositoryInfo(
+                    github_repository_id=99,
+                    owner="octocat",
+                    name="hello-world",
+                    full_name="octocat/hello-world",
+                    default_branch="main",
+                    private=False,
+                    archived=False,
+                    disabled=False,
+                )
+            ]
+
+    class FakeTokenService:
+        def __init__(self, *args, **kwargs) -> None:
+            self._api = FakeRepoAPI()
+
+        async def get_installation_token(self, github_installation_id: int):
+            from types import SimpleNamespace
+
+            return SimpleNamespace(token="ghs_installation")
+
+    monkeypatch.setattr(
+        "app.services.github_app_token_service.GitHubAppTokenService",
+        FakeTokenService,
+    )
+
+    state = await OAuthStateStore(kv).issue("/", installation_id=500)
+    response = await client.get(
+        f"/api/v1/auth/github/callback?code=abc&state={state}",
+        follow_redirects=False,
+    )
+    assert response.status_code == 303
+
+    from sqlalchemy import select
+
+    from app.models import GitHubInstallationRepository
+
+    cached = (
+        await session.execute(select(GitHubInstallationRepository))
+    ).scalars().all()
+    assert [r.full_name for r in cached] == ["octocat/hello-world"]

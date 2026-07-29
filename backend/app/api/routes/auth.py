@@ -44,6 +44,10 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/v1/auth", tags=["auth"])
 
+# Where a user lands once an installation has been dealt with. The repository
+# picker lives here, so it is the page that can actually act on the result.
+INSTALL_LANDING = "/projects"
+
 # Overridable in tests so no live GitHub call is ever made.
 _oauth_client_factory = GitHubOAuthClient
 
@@ -123,6 +127,17 @@ async def github_callback(
         audit(LOGIN_FAILED, reason="github_error", detail=error, ip=ip)
         raise InvalidInputError(f"GitHub sign-in was cancelled or failed: {error}")
 
+    # An install started on github.com lands here with no `state` — the user
+    # never passed through /github/login, so there was no round trip of ours
+    # to carry one. This is normal for GitHub Apps that request user
+    # authorization during installation, and for "Save" on the repository
+    # access screen. Trusting a stateless callback would reopen sign-in to
+    # CSRF, so we start a proper round trip carrying the installation id
+    # instead. GitHub returns immediately without re-prompting an already
+    # authorized user, and that second callback takes the verified path below.
+    if not state and setup_action:
+        return await _restart_from_install(request, ip, installation_id, setup_action)
+
     # State is validated before the code is touched, and burned on read so a
     # replayed callback cannot mint a second session.
     oauth_state = await _state_store(request.app.state.kv).consume(state)
@@ -154,7 +169,7 @@ async def github_callback(
 
         if pending_installation is not None:
             redirect_to = await _link_installation(
-                db, user, pending_installation, access_token, redirect_to
+                request, db, user, pending_installation, access_token, redirect_to
             )
     except OAuthError as exc:
         audit(LOGIN_FAILED, reason="oauth_failed", detail=str(exc), ip=ip)
@@ -177,8 +192,38 @@ def _coerce_installation_id(raw: str) -> int | None:
     return value if value > 0 else None
 
 
+async def _restart_from_install(
+    request: Request, ip: str, installation_id: str, setup_action: str
+) -> RedirectResponse:
+    """Turn a stateless install redirect into a round trip we started."""
+    github_installation_id = _coerce_installation_id(installation_id)
+
+    if setup_action == "request":
+        # An organisation install waiting on an owner to approve it. There is
+        # nothing to verify until that happens.
+        return RedirectResponse(
+            _safe_redirect(f"{INSTALL_LANDING}?install_pending=1"), status_code=303
+        )
+
+    if github_installation_id is None or not settings.github_oauth_configured():
+        # Nothing actionable came back (e.g. "Configure" closed without a
+        # change). Put the user back on the page they came from.
+        return RedirectResponse(_safe_redirect(INSTALL_LANDING), status_code=303)
+
+    state = await _state_store(request.app.state.kv).issue(
+        redirect_to=INSTALL_LANDING, installation_id=github_installation_id
+    )
+    audit(LOGIN_STARTED, ip=ip, source="github_install")
+    return RedirectResponse(authorize_url(state), status_code=307)
+
+
 async def _link_installation(
-    db, user, github_installation_id: int, access_token: str, redirect_to: str
+    request: Request,
+    db,
+    user,
+    github_installation_id: int,
+    access_token: str,
+    redirect_to: str,
 ) -> str:
     """Verify and record an installation using the just-issued user token.
 
@@ -191,18 +236,44 @@ async def _link_installation(
     )
 
     try:
-        await InstallationService(db).link_installation_for_user(
+        installation = await InstallationService(db).link_installation_for_user(
             user, github_installation_id, access_token
         )
     except InstallationAccessError:
-        return "/settings/installations?error=not_available"
+        return f"{INSTALL_LANDING}?install_error=not_available"
     except Exception:
         logger.exception(
             "Installation %s could not be linked after sign-in",
             github_installation_id,
         )
-        return "/settings/installations?error=verification_failed"
-    return redirect_to if redirect_to != "/" else "/settings/installations"
+        return f"{INSTALL_LANDING}?install_error=verification_failed"
+
+    await _sync_repositories(request, db, installation)
+    return redirect_to if redirect_to != "/" else INSTALL_LANDING
+
+
+async def _sync_repositories(request: Request, db, installation) -> None:
+    """Populate the repository cache for a freshly linked installation.
+
+    The picker reads the local cache, which is empty the moment a link is
+    created — without this the user lands on "no repositories" straight after
+    granting access to some. Best-effort: a failure leaves the Refresh button
+    to do the same job, so it must not break sign-in.
+    """
+    from app.services.github_app_token_service import GitHubAppTokenService
+    from app.services.repository_discovery import RepositoryDiscoveryService
+
+    try:
+        discovery = RepositoryDiscoveryService(
+            db, GitHubAppTokenService(request.app.state.kv)
+        )
+        await discovery.sync_installation(installation)
+    except Exception:
+        logger.warning(
+            "Initial repository sync failed for installation %s",
+            installation.github_installation_id,
+            exc_info=True,
+        )
 
 
 @router.post("/logout", status_code=204)
