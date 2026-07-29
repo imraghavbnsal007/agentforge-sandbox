@@ -94,9 +94,12 @@ ERROR_CATALOGUE: dict[ErrorCode, ErrorInfo] = {
     ),
     ErrorCode.worker_interrupted: ErrorInfo(
         ErrorCode.worker_interrupted,
-        "The worker stopped before this run finished.",
-        "Any changes produced before the interruption are preserved. Retry to "
-        "start a fresh run.",
+        # Deliberately not "the worker stopped" — all this code proves is that
+        # the run went silent, and saying more sends people debugging a
+        # container that is usually still running perfectly well.
+        "This run stopped reporting progress and was marked inactive.",
+        "Anything it produced is preserved, and the worker log has the "
+        "underlying error. Retry to start a fresh run.",
         retryable=True,
     ),
     ErrorCode.push_failed: ErrorInfo(

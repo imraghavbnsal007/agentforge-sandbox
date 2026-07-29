@@ -108,6 +108,10 @@ REAP_INTERVAL_MINUTES = 5
 
 class WorkerSettings:
     functions = [run_agent, publish_task, analyze_project, reap_abandoned_runs]
+    #: Set explicitly. arq defaults to 300 seconds, which cancels any agent
+    #: run whose model takes longer than five minutes — the run then dies
+    #: with a bare TimeoutError that says nothing about what it was doing.
+    job_timeout = settings.worker_job_timeout_seconds
     cron_jobs = [
         cron(
             reap_abandoned_runs,
