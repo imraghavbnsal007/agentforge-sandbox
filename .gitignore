@@ -13,6 +13,7 @@ node_modules/
 
 # OS
 .DS_Store
+**/.DS_Store
 
 # Database backups (keep the directory, never commit dumps)
 backups/*.sql
