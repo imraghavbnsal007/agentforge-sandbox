@@ -12,7 +12,7 @@ if TYPE_CHECKING:
 
 from app.core.audit import SESSION_REJECTED, audit
 from app.core.config import settings
-from app.core.exceptions import NotFoundError, UnauthorizedError
+from app.core.exceptions import ForbiddenError, NotFoundError, UnauthorizedError
 from app.core.ratelimit import RateLimiter
 from app.core.security import client_ip, read_session_cookie
 from app.db.session import get_db
@@ -218,3 +218,25 @@ Discovery = Annotated[
 ]
 Service = Annotated[ProjectService, Depends(get_project_service)]
 Tasks = Annotated[TaskService, Depends(get_task_service)]
+
+
+def forbid_in_showcase() -> None:
+    """Refuse an operation that a public demonstration must not expose.
+
+    Applied to the endpoints that reach outside the demo: publishing to
+    GitHub, registering or cloning a repository, running analysis (real API
+    spend), and changing a project's AI settings. Enforced server-side, not
+    by hiding buttons — the UI hides them too, but a visitor with curl is
+    the case that matters.
+    """
+    if settings.showcase_mode:
+        raise ForbiddenError(
+            "This is a portfolio demonstration of AgentForge. Creating and "
+            "watching tasks against the bundled sample repository is enabled; "
+            "publishing to GitHub, registering repositories and repository "
+            "analysis are not. Run it locally to use the full workflow."
+        )
+
+
+#: Attach with `dependencies=[ShowcaseGuard]` on a route.
+ShowcaseGuard = Depends(forbid_in_showcase)

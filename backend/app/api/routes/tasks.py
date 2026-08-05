@@ -3,7 +3,7 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, Request, Response, status
 from fastapi.responses import StreamingResponse
 
-from app.api.deps import Events, KV, get_task_service
+from app.api.deps import Events, KV, ShowcaseGuard, get_task_service
 from app.models import Task
 from app.schemas.run import AgentRunRead
 from app.schemas.task import (
@@ -65,7 +65,11 @@ async def retry_task(task_id: int, service: Service) -> TaskRead:
     return TaskRead.model_validate(await service.retry_task(task_id))
 
 
-@router.post("/{task_id}/approve", response_model=TaskRead)
+@router.post(
+    "/{task_id}/approve",
+    response_model=TaskRead,
+    dependencies=[ShowcaseGuard],
+)
 async def approve_task(task_id: int, service: Service) -> TaskRead:
     return TaskRead.model_validate(await service.approve_task(task_id))
 
