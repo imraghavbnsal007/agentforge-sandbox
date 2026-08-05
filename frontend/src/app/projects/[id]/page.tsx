@@ -7,7 +7,7 @@ import { ReanalyzeButton } from "@/components/ReanalyzeButton";
 import { RepoMapTree } from "@/components/RepoMapTree";
 import { ProjectAISettings } from "@/components/ProjectAISettings";
 import { buttonClasses } from "@/components/ui/Button";
-import { getLLMOptions, getProject, type ProjectDetail } from "@/lib/api";
+import { getConfig, getLLMOptions, getProject, type ProjectDetail } from "@/lib/api";
 
 export const dynamic = "force-dynamic";
 
@@ -46,7 +46,11 @@ export default async function ProjectDetailPage({
   } catch {
     notFound();
   }
-  const llmOptions = await getLLMOptions();
+  const [llmOptions, config] = await Promise.all([
+    getLLMOptions(),
+    getConfig().catch(() => null),
+  ]);
+  const showcase = config?.showcase_mode ?? false;
 
   const analysis = project.latest_analysis;
   const analyzing =
@@ -95,7 +99,7 @@ export default async function ProjectDetailPage({
           </p>
         )}
         <div className="mt-3 flex flex-wrap items-center gap-3">
-          {isGitHub && !analyzing && (
+          {isGitHub && !analyzing && !showcase && (
             <ReanalyzeButton
               projectId={project.id}
               label={analysis ? "Re-analyze Repository" : "Analyze Repository"}

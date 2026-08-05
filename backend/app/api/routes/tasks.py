@@ -79,7 +79,11 @@ async def reject_task(task_id: int, service: Service) -> TaskRead:
     return TaskRead.model_validate(await service.reject_task(task_id))
 
 
-@router.delete("/{task_id}", status_code=status.HTTP_204_NO_CONTENT)
+@router.delete(
+    "/{task_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    dependencies=[ShowcaseGuard],
+)
 async def delete_task(task_id: int, service: Service) -> Response:
     """Delete a task and its runs.
 

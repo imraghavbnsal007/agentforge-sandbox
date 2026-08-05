@@ -42,6 +42,14 @@ async def test_publishing_to_github_is_refused(
     assert response.status_code == 403
 
 
+async def test_deleting_a_task_is_refused(client: AsyncClient, showcase, task: Task):
+    """Visitors share one demo account, so one of them wiping another's task
+    is exactly the kind of destructive control a demonstration should not
+    hand out."""
+    response = await client.delete(f"/api/v1/tasks/{task.id}")
+    assert response.status_code == 403
+
+
 async def test_analysis_is_refused(client: AsyncClient, showcase, project: Project):
     """Analysis clones a repository and spends real API budget."""
     response = await client.post(f"/api/v1/projects/{project.id}/analyze")

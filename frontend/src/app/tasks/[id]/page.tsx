@@ -44,6 +44,7 @@ export default async function TaskDetailPage({
     notFound();
   }
   const config = await getConfig();
+  const showcase = config.showcase_mode;
 
   const run = task.latest_run;
   const tests = run?.test_results ?? [];
@@ -120,7 +121,15 @@ export default async function TaskDetailPage({
           </div>
         )}
 
-      {task.status === "ready_for_review" && (
+      {showcase && task.status === "ready_for_review" && (
+        <div className="card border-indigo-400/25 bg-indigo-500/[0.06] px-5 py-3 text-sm text-indigo-200">
+          <span className="font-medium">Publishing is disabled in demo mode.</span>{" "}
+          Running normally, this is where you would review the diff and click
+          Approve to open a real pull request.
+        </div>
+      )}
+
+      {!showcase && task.status === "ready_for_review" && (
         <ReviewActions taskId={task.id} tests={run?.test_results ?? []} />
       )}
 

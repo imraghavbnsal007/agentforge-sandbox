@@ -3,7 +3,7 @@ import { InstallNotice } from "@/components/InstallNotice";
 import { ProjectCard } from "@/components/ProjectCard";
 import { RegisterRepoForm } from "@/components/RegisterRepoForm";
 import { RepoPicker } from "@/components/RepoPicker";
-import { getProjects, getRepositories, getTasks, type Task } from "@/lib/api";
+import { getConfig, getProjects, getRepositories, getTasks, type Task } from "@/lib/api";
 import { EMPTY_REPOSITORY_LIST, type RepositoryList } from "@/lib/repositories";
 import { getAuthStatus } from "@/lib/session";
 
@@ -26,12 +26,14 @@ export default async function ProjectsPage({
   // user needs to know about.
   searchParams: Promise<{ install_error?: string; install_pending?: string }>;
 }) {
-  const [params, projects, tasks, auth] = await Promise.all([
+  const [params, projects, tasks, auth, config] = await Promise.all([
     searchParams,
     getProjects(),
     getTasks().catch((): Task[] => []),
     getAuthStatus(),
+    getConfig().catch(() => null),
   ]);
+  const showcase = config?.showcase_mode ?? false;
   const noticeCode = params.install_pending ? "pending" : params.install_error;
   const githubAppMode = auth.auth_mode === "github_app";
   // Discovery only exists in github_app mode; a failure here must not take
@@ -62,7 +64,16 @@ export default async function ProjectsPage({
 
       <InstallNotice code={noticeCode} />
 
-      {githubAppMode ? (
+      {showcase ? (
+        <div className="card border-indigo-400/25 bg-indigo-500/[0.06] p-5 text-sm text-indigo-200">
+          <p className="font-medium">Repository registration is disabled in demo mode.</p>
+          <p className="mt-1.5 text-xs leading-relaxed text-indigo-200/75">
+            Running normally, this is where you connect the GitHub App and pick
+            which of your repositories AgentForge may read and open pull
+            requests against. The project below is the bundled sample.
+          </p>
+        </div>
+      ) : githubAppMode ? (
         <RepoPicker initial={repositories} />
       ) : (
         <RegisterRepoForm />

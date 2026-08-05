@@ -246,12 +246,17 @@ export function TaskCard({
             {retrying ? <Spinner className="h-3.5 w-3.5" /> : <IconRetry className="h-3.5 w-3.5" />}
           </ActionButton>
         )}
-        <ActionButton
-          label={`Delete task: ${task.title}`}
-          onClick={() => setConfirming(true)}
-        >
-          <IconTrash className="h-3.5 w-3.5" />
-        </ActionButton>
+        {/* No handler means deletion is refused server-side too (showcase
+            mode); showing a button that always 403s would be worse than
+            not showing one. */}
+        {onDeleted && (
+          <ActionButton
+            label={`Delete task: ${task.title}`}
+            onClick={() => setConfirming(true)}
+          >
+            <IconTrash className="h-3.5 w-3.5" />
+          </ActionButton>
+        )}
         <Link
           href={duplicateHref}
           aria-label={`Duplicate task: ${task.title}`}

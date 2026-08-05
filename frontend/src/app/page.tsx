@@ -41,6 +41,7 @@ export default async function Dashboard() {
       </div>
     );
   }
+  const showcase = config.showcase_mode;
 
   return (
     <div className="space-y-6">
@@ -84,7 +85,12 @@ export default async function Dashboard() {
           </Link>
         </div>
       ) : (
-        <TaskBoard tasks={tasks} projects={projects} profiles={options.profiles} />
+        <TaskBoard
+          tasks={tasks}
+          projects={projects}
+          profiles={options.profiles}
+          canDelete={!showcase}
+        />
       )}
     </div>
   );
