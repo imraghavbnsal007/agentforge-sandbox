@@ -1,297 +1,279 @@
 # AgentForge
 
-An MVP web app where you submit a software feature request and the system behaves
-like an AI engineering assistant: it plans the work, changes code in a sample repo,
-runs tests, and produces a PR-style summary.
+**A human-in-the-loop AI software engineering platform.** It analyses a
+repository, plans and implements a change, runs the project's tests, shows you
+a reviewable diff, and creates a GitHub pull request **only after you approve
+it**.
 
-**Phase 2 status:** the pipeline is real. Each task copies `sample_repo/` into a
-scratch workspace, generates a plan, edits files, computes unified diffs, runs
-pytest in the workspace, and writes a PR-style summary. Two agent brains sit
-behind the same `AgentRunner` interface:
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+![Tests](https://img.shields.io/badge/tests-919%20backend%20%7C%2076%20frontend-brightgreen)
+![Python](https://img.shields.io/badge/python-3.12-blue)
+![Next.js](https://img.shields.io/badge/next.js-15-black)
 
-- `AGENT_MODE=mock` (default) — deterministic agent, no API calls; makes a real
-  edit and runs real tests.
-- `AGENT_MODE=llm` — **ClaudeRunner**: Claude plans the change, then edits the
-  workspace through a tool-use loop (`list_files` / `read_file` / `write_file` /
-  `delete_file`). Requires `ANTHROPIC_API_KEY` in `.env`.
+---
 
-## Stack
+## The problem
 
-- **Frontend** — Next.js 15 (App Router, Tailwind) on :3000
-- **Backend** — FastAPI + SQLAlchemy 2 (async) + Alembic on :8000
-- **Database** — PostgreSQL 16
-- **Queue** — Redis 7 + ARQ worker
-- **Agent** — `AGENT_MODE=mock` (stub runner) today; `llm` arrives in Phase 2
+Coding agents are good at writing code and bad at being trusted with it. Most
+either run entirely on your machine with no audit trail, or take autonomous
+action on real repositories where a plausible-looking mistake becomes a commit
+before anyone reads it.
 
-## Quick start
+AgentForge takes the opposite position: **the agent never touches your
+repository until a human has read the diff.** Everything up to that point —
+cloning, planning, editing, testing — happens in a disposable workspace. The
+approval step is the only path to GitHub, and it is a button a person presses.
+
+Most of the engineering here is therefore not the model. It is the guardrails:
+scoped credentials, state machines that cannot contradict themselves, crash
+recovery, duplicate-execution locks, and honest reporting when something fails.
+
+## What it does
+
+| | |
+|---|---|
+| **Analyse** | Clones a repository and detects languages, frameworks, package manager, build/test commands, entry points, API routes and important files. Optionally adds an AI pass for architecture notes, risk areas and grounded improvement suggestions. |
+| **Plan** | Turns a plain-English request into a numbered implementation plan. |
+| **Implement** | Edits the workspace through a tool-use loop — list, read, write, delete files or whole globs — with every call visible in the execution log. |
+| **Test** | Runs the repository's *own* detected test command. If none exists, it says so rather than inventing a pass. |
+| **Review** | Per-file unified diffs, test output, execution log, token usage and cost. |
+| **Publish** | On approval only: fresh clone, re-apply diffs, re-run tests as a final gate, branch, commit, push, open the PR. |
+
+Also: live execution streaming, task cancellation and retry, multi-user GitHub
+sign-in, per-user repository isolation, usage and cost reporting, and crash
+recovery for interrupted runs.
+
+## Human approval and safety model
+
+```
+pending → planning → coding → testing → READY FOR REVIEW
+                                              │
+                        [Approve & Create PR] │ [Reject]
+                                              ▼
+                     publishing → completed (+ PR link)   /   rejected
+```
+
+- **Nothing reaches GitHub before approval.** The agent works only in a
+  temporary clone; rejecting a task leaves no trace on the remote.
+- **Approval re-verifies.** Publishing clones fresh, re-applies the stored
+  diffs, and re-runs the tests. If the base branch moved underneath the run,
+  it fails loudly rather than forcing a stale change through.
+- **Deletions are performed, not patched.** A deletion needs no diff, so it
+  cannot fail for reasons unrelated to the deletion itself.
+- **Failure is reported honestly.** A run that produced nothing usable is a
+  failure; a run that stopped early keeps its work and is labelled
+  *incomplete*. Tests that did not run are never reported as tests that passed.
+- **Repository scope is enforced per request**, not per session — a task can
+  only ever publish to the repository configured on its own project row.
+
+## GitHub integration
+
+AgentForge is a **GitHub App**, not a personal access token pasted into a
+form. That distinction is the core of the authorisation design:
+
+- **OAuth is used for identity only.** The user's OAuth token reads their
+  profile once, verifies an installation belongs to them, and is then
+  discarded. It is never stored, logged, or used against a repository.
+- **Repository access uses installation tokens**, minted per operation from
+  the App's private key, scoped to exactly the repositories the user granted,
+  cached in Redis with an expiry margin so a long clone cannot straddle
+  expiry, and never written to disk or a git remote.
+- **Webhooks are HMAC-SHA256 verified** with replay protection; a delivery
+  that cannot be verified is refused rather than trusted.
+
+Users install the App on their own account or organisation and choose which
+repositories it may see. AgentForge cannot enumerate or reach anything else.
+
+## Architecture
+
+```
+Next.js 15 (App Router, server components, SSE client)
+        │  cookie session + CSRF double-submit
+        ▼
+FastAPI  ──  api → services → repositories → models
+        │
+        ├── PostgreSQL 16   tasks, runs, diffs, events, usage
+        ├── Redis 7         sessions, execution leases, cancellation, token cache
+        └── arq worker      agent runs, publishing, analysis, crash reaper
+```
+
+Notable pieces:
+
+- **Task state machine** with explicit legal transitions and terminal-state
+  immutability, so status can never contradict itself.
+- **Distributed execution leases** (`SET NX EX` plus compare-and-extend) so a
+  redelivered job cannot run the same task twice.
+- **Heartbeats and a reaper** — a worker beats every 30s; a run silent for
+  five minutes is marked abandoned with its work preserved, never discarded.
+- **Server-Sent Events** with replay-then-follow and `Last-Event-ID` cursors,
+  so a reconnecting browser misses nothing and double-counts nothing.
+- **Provider-agnostic LLM layer** — business logic never imports a provider
+  SDK.
+
+Deeper design notes live in [`docs/`](docs/):
+[architecture](docs/PHASE_6_ARCHITECTURE.md) ·
+[task lifecycle](docs/TASK_LIFECYCLE.md) ·
+[real-time events](docs/REALTIME_EVENTS.md) ·
+[worker recovery](docs/WORKER_RECOVERY.md) ·
+[security](docs/SECURITY.md) ·
+[error codes](docs/ERROR_CODES.md) ·
+[testing](docs/TESTING.md)
+
+## AI providers
+
+| Provider | Status |
+|---|---|
+| Anthropic (Claude) | Implemented |
+| Google (Gemini) | Implemented |
+| OpenAI | Registered placeholder — selecting it fails with a clear message |
+| OpenRouter | Registered placeholder |
+| Ollama | Registered placeholder |
+
+Configuration is environment-only; switching provider or model requires no
+code changes. **Execution profiles** map each pipeline phase to a
+provider/model — *Cheap*, *Balanced*, *Premium*, or a custom pairing — and the
+New Task page shows estimated cost before you run anything.
+
+Every call is recorded with tokens, latency, cost and outcome. Where a price
+is unknown the cost is reported as unknown rather than zero.
+
+## Screenshots
+
+> Placeholder — capture and drop into `docs/images/`. See
+> [`docs/LINKEDIN_SHOWCASE.md`](docs/LINKEDIN_SHOWCASE.md) for the shot list.
+
+| View | File |
+|---|---|
+| Dashboard | `docs/images/dashboard.png` |
+| Repository picker | `docs/images/repositories.png` |
+| Repository analysis | `docs/images/analysis.png` |
+| Live execution | `docs/images/execution.png` |
+| Diff review | `docs/images/diff.png` |
+| Generated pull request | `docs/images/pull-request.png` |
+| Usage and cost | `docs/images/usage.png` |
+
+## Demo
+
+A recorded walkthrough is the intended way to see this working end to end —
+the full flow touches a real GitHub repository, which a public deployment
+should not do. The recording sequence and a safe deployment option are
+documented in [`docs/LINKEDIN_SHOWCASE.md`](docs/LINKEDIN_SHOWCASE.md) and
+[`docs/DEPLOYMENT_RECOMMENDATION.md`](docs/DEPLOYMENT_RECOMMENDATION.md).
+
+## Local setup
+
+**Requirements:** Docker and Docker Compose. Nothing else.
 
 ```bash
+git clone https://github.com/imraghavbnsal007/agentforge-sandbox.git
+cd agentforge-sandbox
 cp .env.example .env
-make up          # docker compose up --build
-make seed        # in a second terminal: seed a project + demo tasks
+make up
 ```
 
-Then open:
+Open <http://localhost:3000>. Out of the box this runs in **mock mode** — a
+deterministic agent that makes a real edit and runs real tests, with no API
+keys and no external calls. The whole pipeline works; only the model is
+stubbed.
 
-- Dashboard: http://localhost:3000
-- New Task: http://localhost:3000/tasks/new
-- API docs: http://localhost:8000/docs
-
-Submit a task from the New Task page and watch it move through
-`pending → planning → coding → testing → completed`. The Task Detail page
-shows the request, plan, execution log, per-file diffs, test output, the final
-PR-style summary, a Retry Task button, and a collapsible "View Raw Logs"
-section with the full history of every run (mode, status, error, log).
-
-## Agent modes
-
-The dashboard header shows which mode the server is running; every task row
-and task detail page shows which mode produced its latest run.
-
-### Mock mode (default — no API key needed)
-
-```bash
-# .env
-AGENT_MODE=mock
-```
-
-The deterministic `MockRunner` makes a real edit (adds `multiply()` + tests to
-the workspace copy) and runs real pytest — the full pipeline without API calls.
-Use this for development and demos.
-
-### LLM mode (real Claude agent)
+### Enabling a real model
 
 ```bash
 # .env
 AGENT_MODE=llm
-ANTHROPIC_API_KEY=sk-ant-...          # required
-ANTHROPIC_MODEL=claude-opus-4-8       # optional, this is the default
+ANTHROPIC_API_KEY=sk-ant-...        # or GOOGLE_API_KEY=...
 ```
-
-Then restart the backend and worker so they pick up the new env:
 
 ```bash
 docker compose up -d --force-recreate backend worker
 ```
 
-`ClaudeRunner` asks Claude for a plan, lets it edit the workspace through a
-tool-use loop (`list_files` / `read_file` / `write_file` / `delete_file` —
-every call appears in the execution log), runs pytest on the result, and asks
-Claude for the PR summary. If the API call fails (bad key, rate limit, network),
-the task fails with a readable error shown at the top of the task detail page,
-and Retry Task re-enqueues it.
+### Enabling GitHub pull requests
 
-## Multi-provider AI
+Two modes:
 
-All AI interactions go through one provider interface (`app/llm`): business
-logic never imports a provider SDK. Providers: **Anthropic** and
-**Google Gemini** (implemented), OpenAI / OpenRouter / Ollama (registered
-placeholders — selecting one fails gracefully). Adding a provider is one new
-subclass of `BaseLLMProvider`; registration is automatic.
+- **`AUTH_MODE=local`** — single user, no sign-in, a fine-grained personal
+  access token in `GITHUB_TOKEN`. Simplest for solo use.
+- **`AUTH_MODE=github_app`** — multi-user with GitHub sign-in and
+  per-installation scoped access. See
+  [`docs/GITHUB_APP_SETUP.md`](docs/GITHUB_APP_SETUP.md), or run
+  `scripts/setup_github_app.sh` and then `scripts/enable_github_app.sh`, which
+  validates every prerequisite before switching so you cannot lock yourself
+  out.
 
-Configuration is env-only — switching provider or model requires zero code:
-
-```
-LLM_PROVIDER=anthropic          # anthropic | google | openai | openrouter | ollama
-DEFAULT_MODEL=claude-sonnet-5   # the provider decides validity
-ANTHROPIC_API_KEY=  GOOGLE_API_KEY=  OPENAI_API_KEY=  OPENROUTER_API_KEY=  OLLAMA_URL=
-```
-
-**Execution profiles** map pipeline phases to provider/model (env-overridable):
-*Cheap* (everything on Gemini 3.5 Flash), *Balanced* (analysis on Gemini 3.5
-Flash; planning/coding/review on Claude Sonnet), *Premium* (everything on
-Claude Opus). Note: Gemini 2.5 Flash is unavailable for new users — use
-Gemini 3.5 Flash; historical runs on 2.5 Flash still display correctly. The New Task page shows each profile's estimated cost and latency
-before execution, plus a Custom mode with explicit provider + model selects.
-Projects remember preferred provider/model/profile (Project page → AI
-settings); new tasks default to them. Precedence: task override → task
-profile → project settings → `LLM_PROVIDER`/`DEFAULT_MODEL` → balanced.
-
-Every provider call is recorded as an **LLMRun** (provider, model, phase,
-tokens, estimated cost, latency, success/error — keys are never logged). The
-**Usage** page aggregates totals, cost per provider/model/project, average
-latency, and success rate. Provider failures mark the task failed with a
-readable message and never crash the worker.
-
-## GitHub PR workflow
-
-Projects with GitHub configuration follow a **review-gated** flow instead of
-finishing at `completed`:
-
-```
-pending → planning → coding → testing → READY FOR REVIEW
-                                             │
-                       [Approve & Create PR] │ [Reject]
-                                             ▼
-                    publishing → completed (+ PR link)   /   rejected
-```
-
-The agent works on a shallow clone of your repo. When tests pass, the task
-stops at **ready for review** — nothing touches GitHub yet. On the task page
-you review the plan, diffs, and test results, then click **Approve & Create
-PR**. Only then does AgentForge clone fresh, re-apply the stored diffs
-(`git apply` — fails loudly if the base branch moved), re-run pytest as a final
-gate, create a branch (`agentforge/task-<id>-<slug>`), commit, push, and open
-the PR. **Reject** closes the task with no GitHub activity. If publishing
-fails (bad token, moved base branch), the task returns to ready-for-review
-with the exact error shown, so you can fix the cause and approve again.
-
-### Setup
-
-1. Create a [fine-grained personal access token](https://github.com/settings/personal-access-tokens)
-   scoped to the target repo with **Contents: Read and write** and
-   **Pull requests: Read and write**.
-2. Add to `.env` (never committed; never logged):
-
-   ```
-   GITHUB_TOKEN=github_pat_...
-   GITHUB_ALLOWED_REPOS=you/your-repo    # optional but recommended allowlist
-   ```
-
-3. Restart: `docker compose up -d --force-recreate backend worker`
-4. Register a GitHub-configured project:
-
-   ```bash
-   curl -X POST http://localhost:8000/api/v1/projects \
-     -H 'Content-Type: application/json' \
-     -d '{
-       "name": "My Repo",
-       "repo_url": "https://github.com/you/your-repo.git",
-       "default_branch": "main",
-       "github_owner": "you",
-       "github_repo": "your-repo"
-     }'
-   ```
-
-5. Create tasks against that project from the New Task page.
-
-Safety: tasks can only publish to the repo configured on their project row;
-the optional `GITHUB_ALLOWED_REPOS` allowlist refuses anything else even if a
-project is misconfigured; the token is injected via a git header (never stored
-in remotes or `.git/config`) and scrubbed from all logs and error messages.
-Projects without GitHub fields keep the plain sample-repo flow.
-
-## Repository intelligence
-
-The **Projects** page (http://localhost:3000/projects) registers and analyzes
-repositories:
-
-- **Register** — paste a GitHub URL (+ branch, default `main`). Registration is
-  lightweight: it validates the URL, checks the allowlist, verifies the repo and
-  branch are reachable (`git ls-remote`), and saves. No cloning, no AI calls.
-- **Analyze** — on the project page, *Analyze Repository* enqueues a worker job
-  that clones the repo and detects languages, frameworks, package manager,
-  build/test commands, and important files (deterministic heuristics), then —
-  in llm mode — asks Claude for a summary, architecture notes, risk areas,
-  per-file purposes, and improvement suggestions. Creating a project's *first
-  task* also triggers analysis automatically. Re-analyze any time; analyses are
-  kept as history.
-- **Create Task from Suggestion** — each suggestion links to a prefilled New
-  Task form.
-- **Detected test command** — tasks against an analyzed project run its
-  detected command (e.g. `npm test`) instead of assuming pytest. If analysis
-  found **no test command**, AgentForge does not fake results: the test phase
-  is skipped, the log and task page say
-  *"No automated test command detected"*, and the task still reaches
-  ready-for-review with an explicit unverified warning.
-
-Analysis never reads `.env*`, secret/credential/key files, `node_modules`,
-`venv`, `dist`, `build`, or binary files, and caps file sizes and counts.
-
-### Deep intelligence (Phase 4.1)
-
-- **Archives** — `.zip` / `.tar.gz` / `.tgz` files are extracted into a
-  temporary analysis workspace (zip-slip-guarded, size-capped) and analyzed
-  like committed files. Extracted files are never committed and are deleted
-  with the workspace.
-- **Semantic understanding** — project type, entry points, API routes
-  (FastAPI/Django/Spring), React pages/components, and a logical repository
-  map (for SQL: Database → Tables / Views / Procedures / Triggers).
-- **SQL schema analysis** — tables, columns, primary/foreign keys, CHECK
-  constraints, uniques, indexes, views, procedures, triggers, plus a schema
-  summary and grounded findings (tables without PKs, `*id` columns without FK
-  constraints, views dropped but never created). The AI pass compares the
-  schema against README business rules and flags unenforced ones.
-- **Health score** — 0–100 overall with deterministic sub-scores for
-  structure, documentation, testing, maintainability, and security, each with
-  the reason it was assigned.
-- **Grounded suggestions** — every suggestion carries confidence, effort,
-  reasoning, and must cite real files; ungrounded LLM suggestions are dropped.
-  Anything undeterminable is reported as
-  "Unable to determine from repository." rather than guessed.
-
-## Frontend development notes
-
-The frontend container keeps `node_modules` **and** `.next` in
-container-private volumes — host-side builds, type checks, or deletes can
-never corrupt the running dev server, and `WATCHPACK_POLLING` makes hot
-reload reliable across the Docker bind mount (file edits show up in ~2s).
-
-- `make typecheck` — type-check the frontend with `tsc --noEmit`
-  (no build output; safe anytime).
-- `make frontend-reset` — rebuild the frontend with **fresh** volumes. Use
-  after changing frontend dependencies (a stale `node_modules` volume
-  otherwise shadows newly installed packages) or if the dev server ever
-  serves stale chunks.
-- While the container runs, `frontend/.next` on the host is a Docker
-  mountpoint and cannot be deleted — you also never need to.
-- If a browser tab shows a `ChunkLoadError` after a rebuild (old HTML
-  requesting chunks that no longer exist), the app reloads itself once
-  automatically (`ChunkGuard`), rate-limited so a broken build can't
-  reload-loop.
-
-## Database Safety
-
-All data lives in the `pgdata` Docker volume. `make down` and `make restart`
-**never** touch it. The destructive command `docker compose down -v` exists in
-exactly one place — `scripts/reset_db.sh` — behind a typed confirmation phrase.
+## Testing
 
 ```bash
-make backup                        # backups/agentforge-YYYYMMDD-HHMMSS.sql
-make list-backups                  # newest first
-make restore FILE=backups/xxx.sql  # validate → safety backup → clean restore → migrations
-make reset-db                      # DELETES the volume; requires typing the phrase
-                                   # "DELETE ALL AGENTFORGE DATA"; auto-backup first
+make test                              # backend suite in the container
+cd frontend && npx vitest run          # frontend component tests
+make typecheck                         # tsc --noEmit
 ```
 
-Rules enforced by the scripts (and by `tests/test_ops_safety.py`):
+919 backend tests and 76 frontend tests, at roughly a 1:1 test-to-source line
+ratio. See [`docs/TESTING.md`](docs/TESTING.md).
 
-- Backups are written to a temp file, size- and header-validated, then
-  atomically renamed. An existing file is never overwritten.
-- `make restore` refuses non-pg_dump files, takes an automatic pre-restore
-  safety backup (`auto-agentforge-*.sql`), stops backend/worker during the
-  restore, and runs `alembic upgrade head` afterwards.
-- `make reset-db` and `make restore` always create automatic safety backups
-  first. Retention keeps the newest 10 `auto-*` backups; manually created
-  backups are never deleted.
-- `backups/*.sql` is git-ignored; the directory is mounted read-only into the
-  backend, and `GET /health` reports backup count and freshness.
-- The scripts honor `COMPOSE_PROJECT_NAME`, so an isolated test stack (e.g.
-  `agentforge_bktest`) backs up / resets only its own database.
+## Deployment limitations
 
-## Tests
+**This repository is configured for local development, not production.** Read
+[`docs/DEPLOYMENT_RECOMMENDATION.md`](docs/DEPLOYMENT_RECOMMENDATION.md)
+before deploying anything.
 
-```bash
-make test        # runs pytest in the backend container (SQLite in-memory, no DB needed)
+In particular, the shipped `docker-compose.yml`:
+
+- runs the API with `uvicorn --reload` and the frontend as a dev server;
+- uses a default Postgres password (`agentforge`);
+- serves plain HTTP, so `COOKIE_SECURE=false`;
+- has no TLS termination, backups schedule, resource limits or restart
+  policies.
+
+`SHOWCASE_MODE=true` exists for public demonstration: it forces the mock
+agent and refuses publishing, repository registration, analysis and
+configuration changes, so a visitor cannot reach a real repository or spend
+your API budget.
+
+## ⚠️ Security notice
+
+- **Never commit `.env`, `*.pem`, or any API key.** All are gitignored; this
+  repository's history has been verified clean of them.
+- A GitHub App private key mints tokens for **every repository the App is
+  installed on**. Treat it like a root credential and mount it as a secret.
+- `AUTH_MODE=local` performs **no authentication whatsoever** — every request
+  is the same implicit user. It is safe only on a machine you control, never
+  on a public address.
+- The agent executes the repository's own test command inside the worker
+  container. Only point it at repositories you trust.
+
+## Roadmap
+
+- [ ] Multi-step tasks that span several files with intermediate review
+- [ ] Inline diff comments feeding back into a revision loop
+- [ ] Implement the registered OpenAI / OpenRouter / Ollama providers
+- [ ] Scheduled repository health reports
+- [ ] Production deployment profile with TLS and managed Postgres
+
+## Technology
+
+**Backend** Python 3.12 · FastAPI · SQLAlchemy 2 (async) · Alembic · Pydantic
+· arq · pytest
+**Frontend** TypeScript · Next.js 15 · React 19 · Tailwind CSS 4 ·
+framer-motion · Vitest · Testing Library
+**Infrastructure** PostgreSQL 16 · Redis 7 · Docker Compose
+**Integrations** GitHub Apps · GitHub REST · Anthropic · Google Gemini
+
+## Repository layout
+
+```
+backend/     FastAPI app: api → services → repositories → models
+  app/agent/     runner interface, mock runner, LLM runner, workspace, executors
+  app/llm/       provider-agnostic gateway, profiles, cost tracking
+  app/services/  runs, publishing, GitHub App auth, discovery, recovery
+  app/worker/    arq worker settings and job queue
+frontend/    Next.js dashboard, task detail, projects, usage
+sample_repo/ Small Python project the mock pipeline operates on
+docs/        Architecture, security, operations and showcase documentation
+scripts/     Setup, backup, restore and GitHub App activation helpers
 ```
 
-Or locally without Docker:
+## License
 
-```bash
-cd backend
-python3.13 -m venv .venv
-.venv/bin/pip install -r requirements.txt -r requirements-dev.txt
-.venv/bin/pytest
-```
-
-## Layout
-
-```
-backend/    FastAPI app: api → services → repositories → models
-  app/agent/    AgentRunner interface, MockRunner, ClaudeRunner,
-                Workspace (scratch copy + diffs), PytestExecutor
-  app/worker/   ARQ worker settings + job queue abstraction
-frontend/   Next.js dashboard, New Task, and Task Detail pages
-sample_repo/  Tiny Python project the agent operates on (never edited in place)
-docs/       Design docs
-```
+[MIT](LICENSE) © Raghav Bansal
