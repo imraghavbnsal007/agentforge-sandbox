@@ -6,7 +6,7 @@ a reviewable diff, and creates a GitHub pull request **only after you approve
 it**.
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
-![Tests](https://img.shields.io/badge/tests-919%20backend%20%7C%2076%20frontend-brightgreen)
+[![CI](https://github.com/imraghavbnsal007/agentforge-sandbox/actions/workflows/ci.yml/badge.svg)](https://github.com/imraghavbnsal007/agentforge-sandbox/actions/workflows/ci.yml)
 ![Python](https://img.shields.io/badge/python-3.12-blue)
 ![Next.js](https://img.shields.io/badge/next.js-15-black)
 
@@ -209,8 +209,9 @@ cd frontend && npx vitest run          # frontend component tests
 make typecheck                         # tsc --noEmit
 ```
 
-919 backend tests and 76 frontend tests, at roughly a 1:1 test-to-source line
-ratio. See [`docs/TESTING.md`](docs/TESTING.md).
+Roughly 920 backend and 76 frontend tests, at about a 1:1 test-to-source
+line ratio. The badge above reports the live result — an exact count here would
+drift the moment a test is added. See [`docs/TESTING.md`](docs/TESTING.md).
 
 ## Deployment limitations
 
