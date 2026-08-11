@@ -317,7 +317,7 @@ class AnalysisService:
 
             analyst = self._analyst
             spec = None
-            if analyst is None and settings.agent_mode == AgentMode.llm:
+            if analyst is None and settings.effective_agent_mode() == AgentMode.llm:
                 from app.llm.base import get_provider_class
                 from app.llm.profiles import resolve_specs
                 from app.llm.service import LLMService

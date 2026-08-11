@@ -8,7 +8,7 @@ import logging
 
 from fastapi import APIRouter, status
 
-from app.api.deps import CurrentUser, Discovery, Service
+from app.api.deps import CurrentUser, Discovery, Service, ShowcaseGuard
 from app.core.config import settings
 from app.core.exceptions import ForbiddenError
 from app.schemas.project import ProjectRead
@@ -92,7 +92,10 @@ async def refresh_repositories(
 
 
 @router.post(
-    "/register", response_model=ProjectRead, status_code=status.HTTP_201_CREATED
+    "/register",
+    response_model=ProjectRead,
+    status_code=status.HTTP_201_CREATED,
+    dependencies=[ShowcaseGuard],
 )
 async def register_repository(
     data: RepositoryRegister,

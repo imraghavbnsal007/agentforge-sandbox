@@ -12,6 +12,8 @@ router = APIRouter(prefix="/api/v1", tags=["meta"])
 class ConfigRead(BaseModel):
     agent_mode: AgentMode
     auth_mode: AuthMode
+    #: Public demonstration: publishing, registration and analysis are refused.
+    showcase_mode: bool
     llm_provider: str
     default_model: str
     # Kept for backward compatibility with older UI reads.
@@ -24,8 +26,9 @@ class ConfigRead(BaseModel):
 @router.get("/config", response_model=ConfigRead)
 async def get_config() -> ConfigRead:
     return ConfigRead(
-        agent_mode=settings.agent_mode,
+        agent_mode=settings.effective_agent_mode(),
         auth_mode=settings.auth_mode,
+        showcase_mode=settings.showcase_mode,
         llm_provider=settings.llm_provider,
         default_model=settings.resolved_default_model(),
         anthropic_model=settings.resolved_default_model(),

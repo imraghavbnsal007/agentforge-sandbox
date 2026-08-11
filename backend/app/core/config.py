@@ -15,6 +15,14 @@ class Settings(BaseSettings):
     redis_url: str = "redis://localhost:6379/0"
     agent_mode: AgentMode = AgentMode.mock
 
+    # Public-portfolio demonstration. A visitor may create and watch tasks
+    # against the bundled sample repository and nothing else: no repository
+    # registration or cloning, no analysis, no publishing to GitHub, no
+    # server configuration changes, and the deterministic mock agent
+    # regardless of AGENT_MODE — so a stranger cannot spend the operator's
+    # API budget or reach a real repository. See docs/DEPLOYMENT_RECOMMENDATION.md.
+    showcase_mode: bool = False
+
     # --- LLM provider configuration (all env-overridable, no code changes) ---
     llm_provider: str = "anthropic"
     default_model: str = ""  # empty -> falls back to anthropic_model below
@@ -126,6 +134,16 @@ class Settings(BaseSettings):
 
     def cors_origin_list(self) -> list[str]:
         return [o.strip() for o in self.cors_origins.split(",") if o.strip()]
+
+    def effective_agent_mode(self) -> AgentMode:
+        """The agent that will actually run.
+
+        Showcase mode forces the deterministic mock runner whatever
+        AGENT_MODE says, so a public visitor cannot spend the operator's
+        API budget. Resolved in one place rather than at each call site,
+        because a single missed check would be a live billing hole.
+        """
+        return AgentMode.mock if self.showcase_mode else self.agent_mode
 
     def is_github_app_mode(self) -> bool:
         return self.auth_mode == AuthMode.github_app

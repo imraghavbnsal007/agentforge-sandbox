@@ -56,6 +56,9 @@ services:
       # Secure cookies require HTTPS — enable in production only.
       COOKIE_SECURE: ${COOKIE_SECURE:-false}
       TRUST_PROXY_HEADERS: ${TRUST_PROXY_HEADERS:-false}
+      # Public portfolio demonstration. Off by default; see
+      # docs/DEPLOYMENT_RECOMMENDATION.md before turning it on.
+      SHOWCASE_MODE: ${SHOWCASE_MODE:-false}
     command: sh -c "alembic upgrade head && uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload"
     ports:
       - "8000:8000"
@@ -100,8 +103,13 @@ services:
   frontend:
     build: ./frontend
     environment:
-      API_URL: http://backend:8000
-      NEXT_PUBLIC_API_URL: http://localhost:8000
+      # Server-side calls stay on the Docker network.
+      API_URL: ${INTERNAL_API_URL:-http://backend:8000}
+      # Browser-side calls. This one is baked into the client bundle, so a
+      # deployment behind any hostname other than localhost MUST set it —
+      # it was previously hardcoded, which silently broke every non-local
+      # deployment.
+      NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://localhost:8000}
       # Reliable file watching for HMR across the macOS/Windows bind mount.
       WATCHPACK_POLLING: "true"
     ports:

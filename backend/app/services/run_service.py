@@ -155,7 +155,7 @@ class RunService:
         # raises MissingGreenlet inside the async session.
         run = AgentRun(
             task_id=task.id,
-            mode=settings.agent_mode,
+            mode=settings.effective_agent_mode(),
             file_changes=[],
             test_results=[],
         )
@@ -445,7 +445,7 @@ class RunService:
         return run
 
     def _build_runner(self, task: Task, project: Project, run: AgentRun) -> AgentRunner:
-        if settings.agent_mode == AgentMode.mock:
+        if settings.effective_agent_mode() == AgentMode.mock:
             return get_mock_runner()
         from app.agent.llm_runner import LLMRunner
 

@@ -37,10 +37,13 @@ export function TaskBoard({
   tasks,
   projects,
   profiles,
+  canDelete = true,
 }: {
   tasks: Task[];
   projects: Project[];
   profiles: ProfileInfo[];
+  /** False in showcase mode, where deletion is refused server-side too. */
+  canDelete?: boolean;
 }) {
   const [query, setQuery] = useState("");
   const [filter, setFilter] = useState<FilterKey>("all");
@@ -173,10 +176,14 @@ export function TaskBoard({
                     ? (costByProfile.get(task.execution_profile) ?? null)
                     : null
                 }
-                onDeleted={(id) => {
-                  setDeletedIds((prev) => [...prev, id]);
-                  setToast("Task deleted");
-                }}
+                onDeleted={
+                  canDelete
+                    ? (id) => {
+                        setDeletedIds((prev) => [...prev, id]);
+                        setToast("Task deleted");
+                      }
+                    : undefined
+                }
                 index={i}
               />
             );

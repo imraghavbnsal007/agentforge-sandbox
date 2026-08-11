@@ -75,6 +75,8 @@ export interface Task {
 
 export interface AppConfig {
   agent_mode: "mock" | "llm";
+  /** Public demonstration: publishing, registration and analysis are refused. */
+  showcase_mode: boolean;
   llm_provider: string;
   default_model: string;
   anthropic_model: string;

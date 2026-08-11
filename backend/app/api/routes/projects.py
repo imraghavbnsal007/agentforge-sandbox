@@ -2,7 +2,7 @@ from typing import Annotated
 
 from fastapi import APIRouter, Depends, status
 
-from app.api.deps import Queue, get_project_service
+from app.api.deps import Queue, ShowcaseGuard, get_project_service
 from app.models import Project
 from app.schemas.analysis import AnalysisRead
 from app.schemas.project import (
@@ -37,13 +37,21 @@ async def list_projects(service: Service) -> list[ProjectRead]:
     return [_to_read(p) for p in await service.list_projects()]
 
 
-@router.post("", response_model=ProjectRead, status_code=status.HTTP_201_CREATED)
+@router.post(
+    "",
+    response_model=ProjectRead,
+    status_code=status.HTTP_201_CREATED,
+    dependencies=[ShowcaseGuard],
+)
 async def create_project(data: ProjectCreate, service: Service) -> ProjectRead:
     return ProjectRead.model_validate(await service.create_project(data))
 
 
 @router.post(
-    "/register", response_model=ProjectRead, status_code=status.HTTP_201_CREATED
+    "/register",
+    response_model=ProjectRead,
+    status_code=status.HTTP_201_CREATED,
+    dependencies=[ShowcaseGuard],
 )
 async def register_project(data: ProjectRegister, service: Service) -> ProjectRead:
     return ProjectRead.model_validate(await service.register_project(data))
@@ -58,7 +66,11 @@ async def get_project(project_id: int, service: Service) -> ProjectDetail:
     return detail
 
 
-@router.patch("/{project_id}/settings", response_model=ProjectRead)
+@router.patch(
+    "/{project_id}/settings",
+    response_model=ProjectRead,
+    dependencies=[ShowcaseGuard],
+)
 async def update_project_settings(
     project_id: int, data: ProjectSettingsUpdate, service: Service
 ) -> ProjectRead:
@@ -66,7 +78,11 @@ async def update_project_settings(
     return _to_read(await service.get_project_detail(project_id))
 
 
-@router.post("/{project_id}/analyze", response_model=AnalysisRead)
+@router.post(
+    "/{project_id}/analyze",
+    response_model=AnalysisRead,
+    dependencies=[ShowcaseGuard],
+)
 async def analyze_project(
     project_id: int, service: Service, queue: Queue
 ) -> AnalysisRead:
