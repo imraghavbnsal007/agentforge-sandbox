@@ -7,6 +7,7 @@ generation is a single stage.
 """
 
 import asyncio
+import time
 from datetime import datetime, timedelta, timezone
 
 import pytest
@@ -167,16 +168,33 @@ async def test_losing_the_lease_stops_the_run_at_the_next_checkpoint(
 async def test_the_background_loop_beats_repeatedly(
     session: AsyncSession, task: Task
 ) -> None:
-    run = await _running_run(session, task, age=300)
+    """The loop keeps beating on its own, not just once when it starts.
+
+    Deliberately waits for observed beats rather than sleeping a fixed
+    amount and hoping the event loop scheduled the task. The fixed-sleep
+    version of this test failed roughly one run in five under load, and a
+    test that fails at random teaches you to ignore failures.
+    """
+    # Comfortably past the staleness window, so "not stale" at the end can
+    # only be the beats — 300 sits exactly on the boundary and raced there.
+    run = await _running_run(session, task, age=STALE_AFTER_SECONDS * 2)
+    # Beats are counted through the lease, which is a plain integer on the
+    # fake. Polling the database instead would mean touching this session
+    # from the test while the beater is using it — the concurrent-use
+    # hazard SharedSession exists to avoid.
+    lock = FakeLock()
     beater = RunHeartbeat(
-        _tracker(session, task, run),
+        _tracker(session, task, run, lock=lock, lease=object()),
         interval_seconds=0.01,
         session_factory=_factory(session),
     )
 
     async with beater:
-        await asyncio.sleep(0.1)
+        deadline = time.monotonic() + 5.0
+        while lock.renewals < 3 and time.monotonic() < deadline:
+            await asyncio.sleep(0.01)
 
+    assert lock.renewals >= 3, f"expected repeated beats, observed {lock.renewals}"
     await session.refresh(run)
     assert not is_stale(run, datetime.now(timezone.utc))
 
