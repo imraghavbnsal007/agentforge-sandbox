@@ -28,6 +28,11 @@ def _neutral_github_settings(monkeypatch: pytest.MonkeyPatch):
 
     monkeypatch.setattr(settings, "github_allowed_repos", "")
     monkeypatch.setattr(settings, "auth_mode", AuthMode.local)
+    # A deterministic token, not the developer's real one. Nineteen tests
+    # passed only because the container happened to have GITHUB_TOKEN set
+    # from .env, and failed on any clean checkout — including CI. Tests that
+    # need it *absent* already blank it themselves.
+    monkeypatch.setattr(settings, "github_token", "test-token")
     # Also neutralise GitHub App configuration. Without this, tests pass or
     # fail depending on whether the developer running them happens to have a
     # real App configured in .env — which is exactly the kind of ambient
