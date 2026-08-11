@@ -169,7 +169,14 @@ def test_a_finished_run_is_never_stale(status):
 
 
 def test_a_naive_timestamp_is_handled():
-    """SQLite hands back naive datetimes; comparison must not explode."""
+    """SQLite hands back naive datetimes; comparison must not explode.
+
+    Naive *UTC*, specifically — which is what is_stale assumes when it
+    attaches a timezone. Building this from datetime.now() used naive
+    *local* time, so the test passed only on a machine running in UTC and
+    failed by exactly the local offset anywhere else.
+    """
     run = _run(RunStatus.running, None)
-    run.heartbeat_at = datetime.now() - timedelta(seconds=STALE_AFTER_SECONDS + 60)
+    naive_utc = datetime.now(timezone.utc).replace(tzinfo=None)
+    run.heartbeat_at = naive_utc - timedelta(seconds=STALE_AFTER_SECONDS + 60)
     assert is_stale(run, datetime.now(timezone.utc)) is True
